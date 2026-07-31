@@ -1,0 +1,80 @@
+# Agent instructions — DF26 vibe-code extension workshop
+
+**READ THIS BEFORE WRITING ANY CODE IN THIS REPO.**
+
+## What this repo is
+
+A live workshop repo for Dreamforce 2026 Session 3047: "Vibe-Code Your
+First Tableau Extension." Attendees write Lightning Web Components that
+run as **Tableau Next dashboard extensions**. Nothing else.
+
+## The two skills that OWN this work
+
+Before writing any code, load and follow these skills (in `.a4drules/skills/`):
+
+1. **`tableau-next-workshop-lwc`** — for anything involving the LWCs
+   (`vibeTable`, `vibeInsight`, `vibeAction`), the Tableau Next SDK,
+   Apex-backed insights, or the Log a Call action. The skill ships
+   pattern references under `references/` — read the one that matches
+   the current build, then author the LWC from the attendee's prompt.
+
+2. **`tableau-next-workshop-sdm-discovery`** — for anything involving the
+   Semantic Data Model: finding the SDM, listing fields, mapping fuzzy
+   attendee terms ("amount", "account") to real API names, and choosing
+   between `table_field` and `semantic_field` wire shapes.
+
+**If the user's message mentions any of these terms**, load the skills
+FIRST, then act:
+
+- "Tableau Next", "dashboard extension", "extension LWC"
+- "vibeTable", "vibeInsight", "vibeAction"
+- "analytics__Dashboard", "semantic model", "SDM"
+- "top opportunities", "Insight button", "Log a Call"
+- "Build 1", "Build 2", "Build 3"
+
+## Landmines to avoid (the skills fix all of these)
+
+- **Do NOT set the LWC target to `tableau__DashboardExtension`** — that
+  target does not exist. The correct value is `<target>analytics__Dashboard</target>`.
+- **Do NOT fall back to `lightning__AppPage`** if the analytics target
+  errors. That produces an App Builder page, not a Tableau widget.
+- **Do NOT use `fetchDataUsingQueryAndSource`** — it sends `queryJson`
+  verbatim to the semantic engine, so dashboard filters and parameters
+  never flow into the query. Use `registerFieldsForQuery` — it lets the
+  dashboard runtime own the query and re-fires it with filter context
+  on every change. See the LWC skill's Gate #7.
+- **Do NOT call `aiplatform.ModelsAPI` from JavaScript.** Always via an
+  `@AuraEnabled` Apex method. Trust Layer routing is mandatory.
+- **Do NOT use `NavigationMixin`** for Salesforce navigation from within
+  the extension — it silently fails inside `*--analytics.<domain>`. Use
+  `window.open` with an origin-rewritten URL.
+
+If you're about to reach for any of the above because "that's how
+Lightning normally works" — STOP and read the skill instead. The skill
+was written after the workshop team hit each of these traps.
+
+## Repo conventions
+
+- **Per-build LWCs**: `lwc/vibeTable/` → `lwc/vibeInsight/` → `lwc/vibeAction/`.
+  Build 1 (`vibeTable`) is scaffolded from scratch. Builds 2 and 3 each
+  create a NEW LWC, starting from the attendee's deployed LWC from the
+  previous build (in `force-app/main/default/lwc/`) plus the matching
+  pattern reference under the skill's `references/`. Do NOT edit a
+  single LWC across builds.
+- **Deploy scope**: only touch `force-app/main/default/lwc/vibe<Name>/`
+  for each build. Never redeploy the whole `force-app` — you'll re-deploy
+  the pre-baked Apex class and waste time.
+- **Class naming**: PascalCase (`VibeTable`), files camelCase
+  (`vibeTable.js`), `<masterLabel>` title-case with space (`Vibe Table`).
+
+## Attendee UX rule
+
+Every build should feel like the attendee's prompt authored the code.
+Do NOT copy a reference verbatim and present it as "here you go." Read
+the reference to know what shape works, then generate the file from
+the attendee's prompt, matching that shape.
+
+## When in doubt
+
+Read the skill. If the skill contradicts something else you know about
+Salesforce, the skill wins. This is a workshop-scoped context.
