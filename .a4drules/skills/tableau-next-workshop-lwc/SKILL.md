@@ -760,7 +760,9 @@ patterns, put `key` on a real DOM element (`<tr>`, `<tbody>`).
     ├── d3-radar.md                   ← multi-metric industry compare (attributed to Skip)
     ├── d3-funnel.md                  ← pipeline funnel by opportunity stage (attributed to Skip)
     ├── d3-treemap.md                 ← revenue by industry × account (attributed to Skip)
-    └── d3-bump.md                    ← rank-over-time by account (attributed to Skip)
+    ├── d3-bump.md                    ← rank-over-time by account (attributed to Skip)
+    ├── d3-chord.md                   ← circular flow between type × stage (workshop-original)
+    └── video-player.md               ← MP4/YouTube video tile, no SDK (attributed to Skip)
 ```
 
 Each reference is a **pattern**, not a starter. Read it, understand
@@ -771,17 +773,22 @@ Apex class names) is a placeholder to be replaced from the discovery
 hand-off (Gate #2).
 
 **When the attendee asks for "something other than a table"** — a
-chart, viz, or shape — the 5 `d3-<name>.md` references cover the
+chart, viz, or shape — the 6 `d3-<name>.md` references cover the
 sanctioned chart types. Each is a full end-to-end pattern (SDM query
 shape, layout mechanic, common surprises) and works with the workshop
 template's Sales Cloud SDM out of the box. Read the matching
 `d3-<name>.md` **plus** `d3-in-lwc.md` before writing code — the
 survival-guide rules in the latter still apply per chart.
 
+**When the attendee asks for a video tile** — read `references/
+video-player.md` instead. It is the one pattern with **no SDM query
+and no `@api sdk`** — do not run SDM discovery for it, and do not add
+an `sdk` property to its meta.xml.
+
 ## Attribution
 
-Forked from `tableau-next-custom-lwc` (Antoine Laviron / Radhika Maiya) at
-`alaviron/tableau-skills`. Wire-format ground truth reverse-engineered
-from Skip Sauls' `aftest` and John Demby's
-`tableau-vibe-coding-workshop-starter-kit-main/cloudKicksSankey`. This
-workshop fork is DF26-specific — do not reuse outside the workshop.
+Forked from `tableau-next-custom-lwc` at `alaviron/tableau-skills`
+(Tableau Next tooling team). Wire-format ground truth reverse-engineered
+from the Tableau Next Vibes team's `aftest` tool and the
+`tableau-vibe-coding-workshop-starter-kit-main/cloudKicksSankey` reference.
+This workshop fork is DF26-specific — do not reuse outside the workshop.

@@ -12,7 +12,7 @@ description: |
 license: Apache-2.0
 metadata:
   author: alaviron
-  version: workshop-2.4
+  version: workshop-3.0
   api_version: v66.0
 ---
 

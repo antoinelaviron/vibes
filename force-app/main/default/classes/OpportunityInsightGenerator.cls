@@ -55,6 +55,7 @@ public with sharing class OpportunityInsightGenerator {
             }
             return 'No insight generated. Please retry.';
         } catch (aiplatform.ModelsAPI.createGenerations_ResponseException e) {
+            // Intentional: kept for live debugging during the workshop session.
             System.debug('Models API error ' + e.responseCode + ': ' + e);
             return 'Unable to generate insight (code ' + e.responseCode + '). Please retry.';
         }

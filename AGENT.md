@@ -23,6 +23,12 @@ Before writing any code, load and follow these skills (in `.a4drules/skills/`):
    attendee terms ("amount", "account") to real API names, and choosing
    between `table_field` and `semantic_field` wire shapes.
 
+A third skill, **`tableau-semantic-query-api`**, is a helper invoked by
+`tableau-next-workshop-lwc` (see its `references/smoke-test-query.md`) to
+smoke-test a semantic query over HTTP before Vibes commits to LWC code, and
+for post-deploy verification. It's not a top-level skill you load directly —
+the LWC skill pulls it in when needed.
+
 **If the user's message mentions any of these terms**, load the skills
 FIRST, then act:
 
