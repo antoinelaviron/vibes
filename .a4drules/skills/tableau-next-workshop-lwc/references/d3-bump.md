@@ -1,9 +1,8 @@
 # d3-bump — rank-over-time by account (who moved up, who slipped)
 
-**Attribution:** shape adapted from Skip Sauls' `bumpChart` in
-`aftest/force-app/main/default/lwc/bumpChart/`. Skip's version is
-production-scale (~900 lines, full date parsing, palettes, top-N
-filtering) — this reference keeps the D3 layout mechanic and simplifies
+**Attribution:** shape adapted from an internal reference `bumpChart`
+implementation. That version is production-scale (~900 lines, full date
+parsing, palettes, top-N filtering) — this reference keeps the D3 layout mechanic and simplifies
 everything else for workshop scope. Loads D3 the LWC-native way (per
 `references/d3-in-lwc.md`) and reads from the Sales Cloud SDM.
 
@@ -31,14 +30,14 @@ chart showing how our top 10 accounts have ranked each quarter."*
 - **Bucket dates client-side.** The SDM returns full timestamps; a
   bump chart needs discrete time buckets (quarter / month). Group by
   a `bucketDate(row.closeDate, 'Quarter')` function in `_handleDataUpdate`.
-  See Skip's `bucketDate` implementation as a reference.
+  See the annotated snippet below for a reference implementation.
 - **Rank per bucket, not overall.** For each time bucket, sort
   accounts by amount descending and assign `rank = 1..N`. That per-
-  bucket rank is Y, not the amount itself. Skip's insight: value
+  bucket rank is Y, not the amount itself. Key insight: value
   scales are misleading in a bump chart — rank is what makes the
   crossings readable.
 - **Filter to top N BEFORE ranking.** With 100 accounts, a bump chart
-  is spaghetti. `MAX_TOP_N = 10` is Skip's default. Compute total
+  is spaghetti. `MAX_TOP_N = 10` is the default. Compute total
   amount per account across all buckets → keep top 10 → then rank
   within each bucket.
 - **Handle missing buckets.** If an account has no rows in Q2, its

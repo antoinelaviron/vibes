@@ -1,7 +1,7 @@
 # d3-treemap — nested rectangles by industry × account
 
-**Attribution:** shape adapted from Skip Sauls' `treemap` in
-`aftest/force-app/main/default/lwc/treemap/`. Skip's version pulls
+**Attribution:** shape adapted from an internal reference `treemap`
+implementation. That version pulls
 static CSV — this reference reads from the workshop's Sales Cloud
 SDM and uses `d3.hierarchy`/`d3.treemap` for a two-level nested view.
 

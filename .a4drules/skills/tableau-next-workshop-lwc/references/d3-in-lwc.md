@@ -1,10 +1,9 @@
 # d3-in-lwc — drawing with D3 inside an LWC (shadow-DOM survival guide)
 
-**Attribution:** distilled from Skip Sauls' `aftest` project —
-specifically `aftest/gettingStartedWithExtensions/CLAUDE.md` (the
-"D3 / SVG inside LWC shadow DOM" section and the `_pendingRows`
-lifecycle pattern) and `docs/04-d3-chart.md` (the `simpleBarChart`
-walkthrough).
+**Attribution:** distilled from an internal reference project —
+specifically its guidance on the
+"D3 / SVG inside LWC shadow DOM" pattern and the `_pendingRows`
+lifecycle pattern, plus a `simpleBarChart` walkthrough.
 
 **What this teaches:** how to render a D3 chart inside an LWC and
 have it survive re-renders, cell resizes, and the race between async
@@ -124,7 +123,7 @@ disconnectedCallback() {
 }
 ```
 
-## Common surprises (from Skip's `04-d3-chart.md`)
+## Common surprises
 
 - **Chart renders once, then vanishes on resize.** Missing
   `lwc:dom="manual"` on the chart container.
@@ -148,5 +147,3 @@ disconnectedCallback() {
   query itself (specs, `IDX`, subscribe-before-register) is unchanged.
 - `references/sparkline-column.md` — per-row inline sparklines using
   this same shape.
-- Skip's `aftest/gettingStartedWithExtensions/docs/04-d3-chart.md` —
-  the full walkthrough with a real `simpleBarChart` build.

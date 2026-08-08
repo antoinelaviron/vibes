@@ -754,15 +754,15 @@ patterns, put `key` on a real DOM element (`<tr>`, `<tbody>`).
     ├── sdm-table.md                  ← Build 1 pattern (SDM query + table)
     ├── apex-insight-panel.md         ← Build 2 pattern (Apex + panel-swap)
     ├── salesforce-action-link.md     ← Build 3 pattern (origin-rewrite + Log a Call)
-    ├── d3-in-lwc.md                  ← D3 shadow-DOM survival (attributed to Skip)
+    ├── d3-in-lwc.md                  ← D3 shadow-DOM survival guide
     ├── sparkline-column.md           ← per-row inline sparkline (composes d3-in-lwc + sdm-table)
-    ├── d3-beeswarm.md                ← deal-size distribution scatter (attributed to Skip)
-    ├── d3-radar.md                   ← multi-metric industry compare (attributed to Skip)
-    ├── d3-funnel.md                  ← pipeline funnel by opportunity stage (attributed to Skip)
-    ├── d3-treemap.md                 ← revenue by industry × account (attributed to Skip)
-    ├── d3-bump.md                    ← rank-over-time by account (attributed to Skip)
+    ├── d3-beeswarm.md                ← deal-size distribution scatter
+    ├── d3-radar.md                   ← multi-metric industry compare
+    ├── d3-funnel.md                  ← pipeline funnel by opportunity stage
+    ├── d3-treemap.md                 ← revenue by industry × account
+    ├── d3-bump.md                    ← rank-over-time by account
     ├── d3-chord.md                   ← circular flow between type × stage (workshop-original)
-    └── video-player.md               ← MP4/YouTube video tile, no SDK (attributed to Skip)
+    └── video-player.md               ← MP4/YouTube video tile, no SDK
 ```
 
 Each reference is a **pattern**, not a starter. Read it, understand
@@ -789,6 +789,5 @@ an `sdk` property to its meta.xml.
 
 Forked from `tableau-next-custom-lwc` at `alaviron/tableau-skills`
 (Tableau Next tooling team). Wire-format ground truth reverse-engineered
-from the Tableau Next Vibes team's `aftest` tool and the
-`tableau-vibe-coding-workshop-starter-kit-main/cloudKicksSankey` reference.
+from internal reference tooling and a Sankey-diagram reference build.
 This workshop fork is DF26-specific — do not reuse outside the workshop.

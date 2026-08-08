@@ -1,8 +1,7 @@
 # d3-funnel — pipeline funnel by opportunity stage
 
-**Attribution:** shape adapted from Skip Sauls' `funnelChart` in
-`aftest/force-app/main/default/lwc/funnelChart/`. Skip's version
-already uses `loadScript` — the LWC-native pattern is intact here.
+**Attribution:** shape adapted from an internal reference `funnelChart`
+implementation. That version already uses `loadScript` — the LWC-native pattern is intact here.
 The change is wiring it to the workshop's Sales Cloud SDM instead of
 an `@api` data prop.
 
@@ -35,7 +34,7 @@ opportunities are in each stage."*
     'Value Proposition', 'Proposal', 'Negotiation', 'Closed Won',
     'Closed Lost']` and sort by index. Unknown stages go last.
 - **Trapezoid, not rectangle.** Each row's width tapers to the next
-  row's width — the visual "funneling" effect. Skip's shape:
+  row's width — the visual "funneling" effect. Shape formula:
   `topWidth = maxWidth * (1 - i/N * 0.7)`,
   `bottomWidth = maxWidth * (1 - (i+1)/N * 0.7)`. Adjust the `0.7`
   taper factor to taste.

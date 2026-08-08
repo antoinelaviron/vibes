@@ -1,8 +1,7 @@
 # d3-beeswarm — one-dimensional density scatter (deal-size distribution)
 
-**Attribution:** shape adapted from Skip Sauls' `beeswarmChart` in
-`aftest/force-app/main/default/lwc/beeswarmChart/`. Skip's version
-loads D3 from a CDN and uses static country data — this reference
+**Attribution:** shape adapted from an internal reference `beeswarmChart`
+implementation. That version loads D3 from a CDN and uses static country data — this reference
 loads D3 the LWC-native way (per `references/d3-in-lwc.md`) and reads
 from the workshop's Sales Cloud SDM instead.
 

@@ -1,8 +1,7 @@
 # video-player — embed a video (MP4 or YouTube) in a dashboard tile
 
-**Attribution:** adapted verbatim-in-shape from Skip Sauls'
-`dashboardVideoPlayer` in `aftest/force-app/main/default/lwc/
-dashboardVideoPlayer/`. Skip's version is copied close to as-is —
+**Attribution:** adapted verbatim-in-shape from an internal reference
+`dashboardVideoPlayer` implementation. That version is copied close to as-is —
 this is already workshop-scoped (six `@api` properties, no SDK, no
 Apex) and needs no simplification.
 

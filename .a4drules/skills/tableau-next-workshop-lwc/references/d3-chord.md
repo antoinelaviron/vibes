@@ -1,7 +1,7 @@
 # d3-chord — circular flow between two categories (type × stage)
 
-**Attribution:** no prior implementation existed in Skip Sauls'
-`aftest` project — this pattern is designed fresh for the DF26
+**Attribution:** no prior implementation existed in the internal
+reference project — this pattern is designed fresh for the DF26
 workshop, built on `d3.chord()`/`d3.ribbon()` (D3 core, already in the
 `d3` static resource) and the shadow-DOM survival rules in
 `references/d3-in-lwc.md`.

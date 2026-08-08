@@ -1,8 +1,8 @@
 # d3-radar — polar multi-metric comparison (industry profile)
 
-**Attribution:** shape adapted from Skip Sauls' `radarChart` in
-`aftest/force-app/main/default/lwc/radarChart/` (itself derived from
-Nadieh Bremer's D3 radar-chart gist). Skip's version loads D3 from a
+**Attribution:** shape adapted from an internal reference `radarChart`
+implementation (itself derived from Nadieh Bremer's public D3 radar-chart
+gist). That version loads D3 from a
 CDN and expects data via `@api` — this reference loads D3 the
 LWC-native way (per `references/d3-in-lwc.md`) and pulls from the
 workshop's Sales Cloud SDM.
@@ -44,7 +44,7 @@ opportunity count across industries."*
   post-filter in `_handleDataUpdate` to keep the top N by pipeline.
 - **Fill opacity ≤ 0.35** so overlapping polygons remain readable.
   On hover, boost the hovered polygon to 0.7 and dim the others to
-  0.1 (Skip's original pattern).
+  0.1.
 
 ## Annotated snippet — the polar draw
 

@@ -1,7 +1,7 @@
 # sparkline-column — per-row inline D3 sparkline in a table cell
 
-**Attribution:** shape based on Skip Sauls' `simpleBarChart`
-(`aftest/gettingStartedWithExtensions/docs/04-d3-chart.md`), adapted
+**Attribution:** shape based on an internal reference `simpleBarChart`
+implementation, adapted
 here for per-row rendering inside a `<td>`. Every rule from
 `references/d3-in-lwc.md` still applies — this reference is a
 composition, not a replacement.
