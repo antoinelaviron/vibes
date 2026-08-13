@@ -84,6 +84,8 @@ attendees see literal values in the code. Cleaner, faster to grasp.
 3. **SLDS-first styling.** Use SLDS utility classes. Avoid inline
    `<div style="…">`. A small `<lwc>.css` for iframe-safe layout tweaks
    (min-heights, borders) is fine — see Build 2/3 canonical files.
+   Top-right of the widget is reserved by Tableau Next's own hover
+   chrome — see `apex-insight-panel.md`'s panel-header rule.
 
 4. **Never call the Models API from JS (Build 2).** Always via an
    `@AuraEnabled` Apex method. This is Trust Layer routing — non-negotiable.

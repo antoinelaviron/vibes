@@ -33,6 +33,11 @@ parameter shape it declares.
   in a `slds-text-color_error` paragraph — do not swallow.
 - **`ShowToastEvent` is silently dropped** in a dashboard extension.
   Use in-widget error text.
+- **Top-right corner is reserved by the platform.** In edit/preview
+  mode, Tableau Next's own hover chrome ("show menu") renders over
+  the top-right corner of the widget and wins the click. Never put
+  an actionable control (e.g. the back button) there — put it at the
+  top-**left** of the panel header instead.
 - **Underneath**, the SDM pipeline from `references/sdm-table.md` is
   unchanged — same specs, same `IDX`, same subscribe-before-register.
 
@@ -90,9 +95,9 @@ handleModalClose() {
 
 <template lwc:if={modalOpen}>
   <div class="slds-p-around_medium insight-panel">
-    <div class="slds-grid slds-grid_align-spread slds-p-bottom_small slds-border_bottom">
-      <h3 class="slds-text-heading_small">{modalTitle}</h3>
+    <div class="slds-grid slds-p-bottom_small slds-border_bottom">
       <lightning-button-icon icon-name="utility:back" variant="bare" onclick={handleModalClose}></lightning-button-icon>
+      <h3 class="slds-text-heading_small slds-p-left_small">{modalTitle}</h3>
     </div>
     <div class="slds-p-top_medium">
       <template lwc:if={modalLoading}>
