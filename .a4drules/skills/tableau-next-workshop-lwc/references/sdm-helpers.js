@@ -45,8 +45,9 @@ function isCalculatedField(modelJson, fieldApiName) {
 // ---------------------------------------------------------------
 // 2. Find which data object owns a given field apiName.
 //    Walks semanticDataObjects[].semanticDimensions/semanticMeasurements.
-//    Returns null when the field is model-level (calculated / _clc / _mtc).
-//    Otherwise falls back to the first data object.
+//    Returns null when the field is model-level (calculated / _clc / _mtc)
+//    or unknown. Do not guess an owner for an unknown field; return to
+//    live discovery instead.
 // ---------------------------------------------------------------
 function findObjectForFieldApi(modelJson, fieldApiName) {
   const objs = modelJson?.semanticDataObjects || [];
@@ -65,14 +66,14 @@ function findObjectForFieldApi(modelJson, fieldApiName) {
   if (isCalculatedField(modelJson, fieldApiName)) {
     return null;
   }
-  return objs[0]?.apiName ?? null;
+  return null;
 }
 
 // ---------------------------------------------------------------
 // 3. Qualify a user-supplied field string against SDM JSON.
 //    - "Object.field" -> returned as-is
 //    - top-level calcs / *_clc / *_mtc -> bare apiName (no Object. prefix)
-//    - "field" on an entity -> "Object.field"; else first object fallback
+//    - "field" on an entity -> "Object.field"; unknown fields remain unresolved
 // ---------------------------------------------------------------
 function resolveUserModelString(raw, modelJson) {
   const t = (raw || '').trim();
@@ -83,8 +84,7 @@ function resolveUserModelString(raw, modelJson) {
   }
   const obj = findObjectForFieldApi(modelJson, t);
   if (obj) return qualifiedModel(obj, t);
-  const fallbackObj = modelJson?.semanticDataObjects?.[0]?.apiName;
-  return fallbackObj ? qualifiedModel(fallbackObj, t) : t;
+  return '';
 }
 
 // ---------------------------------------------------------------
@@ -146,7 +146,7 @@ function pickSpecsFromModelJson(modelJson) {
 }
 
 // ---------------------------------------------------------------
-// 5. Normalize fetchData() output to { [qualifiedModel]: value } rows.
+// 5. Normalize positional dataUpdate rows to { [qualifiedModel]: value } rows.
 //
 //    The SDK returns rows in one of three shapes:
 //      a) Array of objects keyed by qualified "Object.field"  -> pass through
