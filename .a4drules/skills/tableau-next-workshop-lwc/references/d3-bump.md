@@ -14,7 +14,7 @@ that a stacked-bar or line chart can't. Not a stock Tableau Next viz.
 **Sales Cloud SDM fit:** rows grouped by `Close_Date` (quarter or
 month) × `Account_Name`, ranked by `Total_Amount_clc`. All three
 exist in the workshop template SDM. Attendee prompt shape: *"bump
-chart showing how our top 10 accounts have ranked each quarter."*
+chart showing how up to 10 returned accounts rank each quarter."*
 
 **Do NOT copy this file verbatim.** SDM apiNames come from discovery.
 
@@ -36,10 +36,11 @@ chart showing how our top 10 accounts have ranked each quarter."*
   bucket rank is Y, not the amount itself. Key insight: value
   scales are misleading in a bump chart — rank is what makes the
   crossings readable.
-- **Filter to top N BEFORE ranking.** With 100 accounts, a bump chart
-  is spaghetti. `MAX_TOP_N = 10` is the default. Compute total
-  amount per account across all buckets → keep top 10 → then rank
-  within each bucket.
+- **Limit the returned set before ranking.** With 100 accounts, a bump chart
+  is spaghetti. `MAX_RETURNED_ACCOUNTS = 10` is the default. Compute total
+  amount per account across the returned buckets, keep up to 10, then rank
+  within each bucket. This is not a global top-10 claim without supported
+  server-side ordering.
 - **Handle missing buckets.** If an account has no rows in Q2, its
   rank there is `null` — break the polyline at that point, don't
   interpolate. `d3.line().defined((d) => d.rank != null)`.
@@ -61,7 +62,7 @@ _renderChart() {
     // rows[i] = { bucket: '2026 Q1', account: 'Acme', amount: 42000 }
     const buckets = [...new Set(this.rows.map((d) => d.bucket))].sort();
 
-    // Top N accounts by total amount across all buckets.
+    // Up to 10 accounts by total amount across returned buckets.
     const totals = d3.rollup(this.rows, (v) => d3.sum(v, (d) => d.amount), (d) => d.account);
     const topAccounts = [...totals].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([a]) => a);
 
@@ -141,8 +142,8 @@ const specs = [
 - **Lines all sit at the top / are horizontal.** Y scale not
   inverted, or rank is `undefined` for most points. Log
   `rankByBucket` to confirm.
-- **Spaghetti — 50 lines everywhere.** No top-N filter. Enforce
-  `topAccounts.slice(0, 10)`.
+- **Spaghetti — 50 lines everywhere.** No returned-set cap. Enforce
+  `topAccounts.slice(0, 10)` and describe the result as bounded.
 - **Line jumps to Y=0 at a gap.** Missing `.defined()` on
   `d3.line()` — the line interpolates across null.
 - **Crossings look linear and jagged.** Missing `curveMonotoneX`.

@@ -1,145 +1,156 @@
-# apex-insight-panel — per-row AI narrative via Apex (Build 2 pattern)
+# apex-insight-panel - Per-row AI narrative (Build 2)
 
-**What this teaches:** how to add a per-row action button that fetches
-an AI-generated narrative from Apex and displays it inline by
-*swapping* the widget's rendered content, without breaking the SDM
-query pipeline underneath.
+Read this with `sdk-query-lifecycle.md` after reading the attendee's deployed
+`vibeTable`. Preserve its query and `IDX` map in a new `vibeInsight` bundle.
 
-**Do NOT copy this file verbatim.** The Apex class name and method
-signature are placeholders — read
-`force-app/main/default/classes/<YourInsightClass>.cls` in the
-attendee's repo before importing, and use the exact method name and
-parameter shape it declares.
+## Apex Contract
 
-## Rules
-
-- **Trust Layer routing: never call the Models API from JS.** Always
-  through an `@AuraEnabled` Apex method. See SKILL.md Gate #4.
-- **Never invent an Apex method name.** Read the `.cls` first, mirror
-  the `@AuraEnabled` signature exactly. See SKILL.md Gate #5.
-- **Import Apex, not JS:**
-  `import <fn> from '@salesforce/apex/<ClassName>.<methodName>'`.
-- **Call with named params:** `await fn({ rowJson: JSON.stringify(payload) })`.
-- **Panel-swap, not modal.** `position: fixed` inside the analytics
-  iframe is fixed to the iframe viewport, not the page — backdrops
-  bleed at the iframe boundary. Instead, render *either* the table
-  *or* the insight panel (mutually exclusive). See SKILL.md
-  "The panel-swap pattern".
-- **Refetch wipes panel state.** When `filterChange` /
-  `parameterChange` fires, close the panel and clear its state —
-  otherwise the panel shows an insight for a row that's no longer
-  in the current filter context.
-- **Surface Apex errors.** Render `e?.body?.message || e?.message`
-  in a `slds-text-color_error` paragraph — do not swallow.
-- **`ShowToastEvent` is silently dropped** in a dashboard extension.
-  Use in-widget error text.
-- **Top-right corner is reserved by the platform.** In edit/preview
-  mode, Tableau Next's own hover chrome ("show menu") renders over
-  the top-right corner of the widget and wins the click. Never put
-  an actionable control (e.g. the back button) there — put it at the
-  top-**left** of the panel header instead.
-- **Underneath**, the SDM pipeline from `references/sdm-table.md` is
-  unchanged — same specs, same `IDX`, same subscribe-before-register.
-
-## Annotated snippet — panel state + click handler
+Read `force-app/main/default/classes/OpportunityInsightGenerator.cls` before
+writing the import. In this workshop it exposes:
 
 ```javascript
-import generateInsight from '@salesforce/apex/<ApexClass>.<method>';
+import generateInsight from '@salesforce/apex/OpportunityInsightGenerator.generateInsight';
+```
 
-@track modalOpen    = false;
-@track modalRow     = null;
+Call it with its named `rowJson` parameter. Do not call the Models API in
+browser code. The pre-baked class returns a bounded user-safe fallback; surface
+that text in the widget instead of using `ShowToastEvent`, which is dropped by
+dashboard extensions.
+
+## Request Ownership
+
+An Apex promise may settle after the user selects another row, closes the panel,
+the dashboard refreshes, or the component disconnects. Use a monotonically
+increasing token and require the token and selected row to still match before
+updating panel state.
+
+```javascript
+@track modalOpen = false;
+@track modalRow = null;
 @track modalLoading = false;
-@track modalText    = '';
-@track modalError   = '';
+@track modalText = '';
+@track modalError = '';
 
-get showTable()  { return this.hasRows && !this.modalOpen; }
-get modalTitle() { return this.modalRow ? `Insight — ${this.modalRow.accountName || this.modalRow.opportunityId}` : 'Opportunity Insight'; }
+_insightRequestToken = 0;
+_focusBack = false;
+_focusTriggerRowKey = null;
+_restoreTriggerFocus = false;
+
+get showTable() { return this.hasRows && !this.modalOpen; }
+get modalTitle() {
+    return this.modalRow
+        ? `Insight - ${this.modalRow.accountName || this.modalRow.opportunityId}`
+        : 'Opportunity Insight';
+}
 
 async handleInsightClick(event) {
-    const rowKey = event.currentTarget.dataset.rowKey;
-    const row = this.rows.find((r) => r.rowKey === rowKey);
+    const row = this.rows.find((item) => item.rowKey === event.currentTarget.dataset.rowKey);
     if (!row) return;
 
-    this.modalRow = row; this.modalOpen = true;
-    this.modalLoading = true; this.modalText = ''; this.modalError = '';
+    const token = ++this._insightRequestToken;
+    this._focusTriggerRowKey = row.rowKey;
+    this.modalRow = row;
+    this.modalOpen = true;
+    this.modalLoading = true;
+    this.modalText = '';
+    this.modalError = '';
+    this._focusBack = true;
 
     const payload = {
-        Opportunity_Id: row.opportunityId, Account: row.accountName,
-        Stage: row.stage, Close_Date: row.closeDate, Type: row.type, Amount: row.amount
+        Account: row.accountName,
+        Stage: row.stage,
+        Close_Date: row.closeDate,
+        Type: row.type,
+        Amount: row.amount
     };
     try {
-        this.modalText = (await generateInsight({ rowJson: JSON.stringify(payload) })) || '(empty response)';
-    } catch (e) {
-        this.modalError = String(e?.body?.message || e?.message || e);
+        const text = await generateInsight({ rowJson: JSON.stringify(payload) });
+        if (!this._isCurrentInsightRequest(token, row.rowKey)) return;
+        this.modalText = text || '(empty response)';
+    } catch (error) {
+        if (!this._isCurrentInsightRequest(token, row.rowKey)) return;
+        console.error('[vibeInsight] insight request failed.');
+        this.modalError = 'Unable to generate insight. Please retry.';
     } finally {
-        this.modalLoading = false;
+        if (this._isCurrentInsightRequest(token, row.rowKey)) this.modalLoading = false;
     }
 }
 
+_isCurrentInsightRequest(token, rowKey) {
+    return token === this._insightRequestToken && this.modalOpen && this.modalRow?.rowKey === rowKey;
+}
+
 handleModalClose() {
-    this.modalOpen = false; this.modalRow = null;
-    this.modalLoading = false; this.modalText = ''; this.modalError = '';
+    this._closeInsightPanel(true);
+}
+
+_invalidateInsightPanel() {
+    this._closeInsightPanel(false);
+}
+
+_closeInsightPanel(restoreTriggerFocus) {
+    this._insightRequestToken += 1;
+    this._restoreTriggerFocus = restoreTriggerFocus;
+    this.modalOpen = false;
+    this.modalRow = null;
+    this.modalLoading = false;
+    this.modalText = '';
+    this.modalError = '';
 }
 ```
 
-## Template shape (mutually exclusive states)
+Call `_invalidateInsightPanel()` before starting a relevant query refresh and
+from `disconnectedCallback`. It invalidates late responses without moving focus
+to a row that the refresh may remove. `handleModalClose()` is the
+user-initiated close path and is the only path that restores focus.
 
-```html
-<template lwc:if={showTable}>
-  <!-- the SDM table from references/sdm-table.md, PLUS an Insight
-       <td> per row: -->
-  <!-- <lightning-button-icon icon-name="utility:einstein" variant="brand"
-         alternative-text="Insight" title="Generate AI insight"
-         data-row-key={row.rowKey} onclick={handleInsightClick}></lightning-button-icon> -->
-</template>
+## Focus After A Panel Swap
 
-<template lwc:if={modalOpen}>
-  <div class="slds-p-around_medium insight-panel">
-    <div class="slds-grid slds-p-bottom_small slds-border_bottom">
-      <lightning-button-icon icon-name="utility:back" variant="bare" onclick={handleModalClose}></lightning-button-icon>
-      <h3 class="slds-text-heading_small slds-p-left_small">{modalTitle}</h3>
-    </div>
-    <div class="slds-p-top_medium">
-      <template lwc:if={modalLoading}>
-        <lightning-spinner alternative-text="Generating insight" size="small"></lightning-spinner>
-      </template>
-      <template lwc:if={modalText}>
-        <p class="insight-narrative">{modalText}</p>
-      </template>
-      <template lwc:if={modalError}>
-        <p class="slds-text-color_error">Insight failed: {modalError}</p>
-      </template>
-    </div>
-  </div>
-</template>
-```
-
-Companion CSS — iframe-safe sizing tweaks only:
-
-```css
-.insight-panel     { min-height: 12rem; }
-.insight-narrative { font-size: 1rem; line-height: 1.5; }
-```
-
-## Refetch → wipe panel state
-
-Inside `_subscribeEvents()`, the `filterChange` / `parameterChange`
-handlers must both (a) enter loading state on the table AND (b) close
-the panel and clear its state — otherwise a stale insight sticks
-around for a row that's no longer in the filtered result set:
+The panel swap removes the triggering Insight control. Move focus to the Back
+control after render, then restore it to the matching row's Insight control on
+close when that row is still rendered. Use data selectors, never DOM position.
+The panel's actionable Back control belongs at top-left because the dashboard
+uses the tile's top-right hover area.
 
 ```javascript
-this.sdk.on(SDK_EVENTS.FILTER_CHANGE, () => {
-    if (!this._isQueryRegistered) return;
-    this.handleModalClose();       // wipe stale insight
-    this._setLoadingState();
-});
+renderedCallback() {
+    this._tryStartPipeline();
+    if (this._focusBack) {
+        this._focusBack = false;
+        this.template.querySelector('[data-insight-back]')?.focus();
+        return;
+    }
+    if (!this.modalOpen && this._restoreTriggerFocus && this._focusTriggerRowKey) {
+        const control = [...this.template.querySelectorAll('[data-insight-control]')]
+            .find((element) => element.dataset.insightRowKey === this._focusTriggerRowKey);
+        control?.focus();
+        this._focusTriggerRowKey = null;
+        this._restoreTriggerFocus = false;
+    }
+}
 ```
 
-## See also
+```html
+<lightning-button-icon
+  icon-name="utility:einstein"
+  variant="brand"
+  alternative-text="Insight"
+  title="Generate AI insight"
+  data-row-key={row.rowKey}
+  data-insight-row-key={row.rowKey}
+  data-insight-control
+  onclick={handleInsightClick}
+></lightning-button-icon>
 
-- SKILL.md gates: **#4** (Trust Layer routing), **#5** (no invented
-  Apex names), and the panel-swap section.
-- `references/sdm-table.md` — the underlying query pipeline.
-- `references/salesforce-action-link.md` — Build 3 layers a Log a Call
-  button on top of this pattern.
+<lightning-button-icon
+  data-insight-back
+  icon-name="utility:back"
+  variant="bare"
+  alternative-text="Back to opportunities"
+  title="Back to opportunities"
+  onclick={handleModalClose}
+></lightning-button-icon>
+```
+
+Keep the table and panel mutually exclusive. Render in-widget error text in a
+`slds-text-color_error` paragraph and use a non-empty spinner alternative text.
