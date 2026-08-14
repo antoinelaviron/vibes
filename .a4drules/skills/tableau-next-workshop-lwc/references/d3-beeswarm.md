@@ -27,9 +27,9 @@ discovery hand-off.
   D3 via `loadScript` from the `d3` static resource (not a CDN — the
   analytics iframe's CSP blocks arbitrary CDNs), `ResizeObserver`
   attached from the render function.
-- **`registerFieldsForQuery`** — same 5-step pipeline as
-  `references/sdm-table.md`. All dimensions first, calc measure last
-  (Gate #8). Query one row per opportunity — a raw
+- **`registerFieldsForQuery`** — follow the canonical lifecycle in
+  `references/sdk-query-lifecycle.md`. Keep all dimensions first and the calc
+  measure last (Gate #6). Query one row per opportunity — a raw
   `Opportunity.Opportunity_Id` dimension, NOT a rollup.
 - **`d3.forceCollide` runs on the client** — no server-side layout.
   Tick the simulation ~120 times synchronously before drawing;

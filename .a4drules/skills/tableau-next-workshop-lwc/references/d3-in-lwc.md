@@ -1,149 +1,184 @@
-# d3-in-lwc — drawing with D3 inside an LWC (shadow-DOM survival guide)
+# d3-in-lwc - D3 lifecycle overlay for dashboard extensions
 
-**Attribution:** distilled from an internal reference project —
-specifically its guidance on the
-"D3 / SVG inside LWC shadow DOM" pattern and the `_pendingRows`
-lifecycle pattern, plus a `simpleBarChart` walkthrough.
+Read this with `sdk-query-lifecycle.md` and a chart-specific reference. The SDK
+lifecycle remains authoritative; this reference adds D3 static-resource loading,
+imperative SVG rendering, and resize-safe cleanup.
 
-**What this teaches:** how to render a D3 chart inside an LWC and
-have it survive re-renders, cell resizes, and the race between async
-library load and async SDK data. LWC's synthetic shadow DOM breaks
-several common D3 patterns silently — this reference documents the
-workarounds.
+## Contents
 
-**Do NOT copy this file verbatim.** Static-resource names, chart
-dimensions, and SDM field references are placeholders — everything
-org-specific comes from the attendee's org and discovery hand-off.
+- [D3 setup](#d3-setup)
+- [Load and data races](#load-and-data-races)
+- [Rendering and resize](#rendering-and-resize)
+- [Disconnect cleanup](#disconnect-cleanup)
+- [Category-heavy charts](#category-heavy-charts)
 
-## Rules
+## D3 Setup
 
-- **Load D3 via `loadScript`** from a static resource named `d3`.
-  Chain from `connectedCallback`; nothing that depends on D3 runs
-  before the `.then` fires.
-- **Any container you populate imperatively needs `lwc:dom="manual"`.**
-  Without it, LWC's synthetic shadow DOM strips imperatively-added
-  children on the next reactive update. **Silent failure** — no
-  error, empty container. This is the #1 D3-on-LWC bug.
-- **Buffer early `dataUpdate` events into `_pendingRows`.** The SDK
-  can fire `dataUpdate` before `loadScript` resolves. Stash the rows
-  in a buffer if `_d3Ready` is false; replay from the `loadScript`
-  `.then`.
-- **Attach `ResizeObserver` from the render function**, not from
-  `connectedCallback` — if the chart container is gated by
-  `<template lwc:if={hasData}>`, it doesn't exist yet at
-  `connectedCallback` time. Make setup idempotent (track which
-  element you're observing).
-- **Scoped CSS doesn't reach imperatively-created nodes.** Tooltips
-  built with `document.createElement` must be styled via inline
-  styles (`.style.left`, `.style.top`, etc.), not a `.css` file.
-  The container the tooltip appends to also needs `lwc:dom="manual"`.
-- **Avoid `url(#id)`** — clipPath, linearGradient, and mask
-  references via `url(#…)` fail across the shadow boundary.
-  Workarounds: draw clipping rectangles in the background fill
-  color, stack thin colored rects for gradient effects.
-- **Prefer responsive sizing.** Read the container's
-  `getBoundingClientRect()` at render time; never hardcode pixel
-  dimensions to the dashboard cell size.
-- **Clean up in `disconnectedCallback`** — disconnect the
-  `ResizeObserver`, remove the tooltip node, clear timers.
+- Load D3 with `loadScript` from the deployed `d3` static resource, never a CDN.
+- Put imperatively populated containers behind `lwc:dom="manual"`; LWC otherwise
+  removes SVG children on a reactive render.
+- Validate `window.d3` and every D3 API required by the selected chart after
+  `loadScript` resolves. A resolved script without the expected global is a
+  terminal D3 error, not an empty chart.
+- Scoped CSS does not reach imperatively created tooltip nodes. Style those nodes
+  inline and remove them during disconnect.
+- Avoid SVG `url(#id)` gradients, masks, and clip paths across the shadow
+  boundary. Use flat fills or drawn shapes instead.
 
-## Annotated snippet — the lifecycle
+## Load And Data Races
+
+The SDK can return rows before D3 is ready. Buffer the most recent rows and
+drain them after the library is ready. Treat D3 load, deferred render, and resize
+work as a second asynchronous lifecycle: each continuation must verify that the
+component generation is still current.
 
 ```javascript
-import { LightningElement, api } from 'lwc';
-import { loadScript } from 'lightning/platformResourceLoader';
-import D3 from '@salesforce/resourceUrl/d3';
+_d3LoadStarted = false;
+_d3Ready = false;
+_d3TerminalError = false;
+_pendingRows = null;
 
-connectedCallback() {
-    if (!this.sdk) return;
-    this._subscribeEvents();                    // Wire sdk.on(...) FIRST
-    loadScript(this, D3).then(() => {
-        this._d3Ready = true;
-        if (this._pendingRows !== null) {       // Replay early rows.
-            this._handleDataUpdate(this._pendingRows);
-            this._pendingRows = null;
-        } else {
-            this._registerQuery();
-        }
-    }).catch((e) => this._showError('D3 failed: ' + e.message));
-}
-
-_subscribeEvents() {
-    this._unsubscribes.push(
-        this.sdk.on('dataUpdate', (rows) => {
-            if (!this._d3Ready) {               // Race guard: buffer early rows.
-                this._pendingRows = rows;
+_loadD3(generation) {
+    if (this._d3LoadStarted) return;
+    this._d3LoadStarted = true;
+    loadScript(this, D3)
+        .then(() => {
+            if (!this._isCurrentPipeline(generation)) return;
+            const d3 = window.d3;
+            if (!d3 || typeof d3.select !== 'function' || typeof d3.scaleBand !== 'function') {
+                this._setD3TerminalError(new Error('D3 did not load the required chart APIs.'));
                 return;
             }
-            this._handleDataUpdate(rows);
+            this._d3Ready = true;
+            if (this._pendingRows !== null) {
+                this._pendingRows = null;
+                if (this.rows.length) this._scheduleChartRender(generation);
+            }
         })
-    );
+        .catch((error) => {
+            if (this._isCurrentPipeline(generation)) this._setD3TerminalError(error);
+        });
+}
+
+_handleDataUpdate(raw, generation) {
+    if (!this._isCurrentPipeline(generation) || this._d3TerminalError) return;
+    this._clearLoadingTimer();
+    const mapped = this._mapRows(raw == null ? [] : raw);
+    this.rows = mapped;
+    this._isLoading = false;
+    this._hasError = false;
+    if (!mapped.length) {
+        this._pendingRows = null;
+        this._clearChart();
+        this.sdk.actions?.notifyLifecycleChange?.(LIFE_CYCLE.NO_DATA);
+        return;
+    }
+    if (!this._d3Ready) {
+        this._pendingRows = mapped;
+        return;
+    }
+    this._scheduleChartRender(generation);
+}
+
+_scheduleChartRender(generation) {
+    // Let LWC commit rows before querying its manual-DOM container.
+    Promise.resolve().then(() => {
+        if (!this._isCurrentPipeline(generation) || this._hasError || !this.rows.length) return;
+        try {
+            this._renderChart(generation);
+            this.sdk.actions?.notifyLifecycleChange?.(LIFE_CYCLE.LOADED);
+        } catch (error) {
+            this._setD3TerminalError(error);
+        }
+    });
+}
+
+_setD3TerminalError(error) {
+    this._d3TerminalError = true;
+    this._setTerminalError(error, 'Visualization failed to load. Please retry.');
+}
+
+_clearChart() {
+    this._chartSummary = null;
+    const container = this.template.querySelector('.chart-container');
+    if (container) container.replaceChildren();
 }
 ```
 
-Template — note `lwc:dom="manual"`:
-
-```html
-<div class="chart-container" lwc:dom="manual"></div>
-```
-
-## ResizeObserver — set up from the render function
+In the component's `_setLoadingState(generation)`, add this first line before
+clearing an existing error. It prevents later filter or parameter callbacks from
+replacing the terminal D3 error with a spinner:
 
 ```javascript
-_setupResizeObserver() {
-    const el = this.template.querySelector('.chart-container');
-    if (!el) return;
-    if (this._resizeObservedEl === el) return;   // idempotent
-    if (this._resizeObserver) this._resizeObserver.disconnect();
+if (this._d3TerminalError) return;
+```
+
+Start `_loadD3(generation)` from `renderedCallback`, not `connectedCallback` or
+`_runPipeline`: `loadScript` needs a rendered component. Capture the same
+pipeline generation that owns the SDK query and start D3 once per generation:
+
+```javascript
+_d3Generation = null;
+
+renderedCallback() {
+    this._tryStartPipeline();
+    const generation = this._pipelineGeneration;
+    if (this._pipelineStarted && generation && this._d3Generation !== generation) {
+        this._d3Generation = generation;
+        this._loadD3(generation);
+    }
+}
+```
+
+If an old unresolved load becomes stale on disconnect, reset `_d3Generation` and
+the load guard so reconnect can retry.
+
+## Rendering And Resize
+
+Set up `ResizeObserver` after the chart container exists, normally inside
+`_renderChart`. Make observer setup idempotent and generation-guard the delayed
+resize render.
+
+```javascript
+_setupResizeObserver(generation) {
+    const element = this.template.querySelector('.chart-container');
+    if (!element || this._resizeObservedEl === element) return;
+    this._resizeObserver?.disconnect();
     this._resizeObserver = new ResizeObserver(() => {
         clearTimeout(this._resizeTimer);
-        this._resizeTimer = setTimeout(() => this._rerenderIfReady(), 150);
+        this._resizeTimer = setTimeout(() => {
+            if (
+                this._isCurrentPipeline(generation) &&
+                this._d3Ready &&
+                !this._hasError &&
+                this.rows.length
+            ) {
+                this._scheduleChartRender(generation);
+            }
+        }, 150);
     });
-    this._resizeObserver.observe(el);
-    this._resizeObservedEl = el;
-}
-
-// Called from _renderChart AFTER the container has been populated —
-// which means it exists in the DOM.
-_renderChart() {
-    /* ...D3 draw code... */
-    this._setupResizeObserver();
+    this._resizeObserver.observe(element);
+    this._resizeObservedEl = element;
 }
 ```
 
-## Cleanup
+Read `getBoundingClientRect()` at render time. A zero-size container often means
+a flex parent needs `min-height: 0`, not that the D3 scales are wrong. Before
+each redraw, remove prior SVG children from the manual container; do not append
+a second chart on top of the first.
 
-```javascript
-disconnectedCallback() {
-    this._unsubscribes.forEach((u) => typeof u === 'function' && u());
-    if (this._resizeObserver) this._resizeObserver.disconnect();
-    this._resizeObservedEl = null;
-    if (this._tooltip) this._tooltip.remove();
-    if (this._resizeTimer) clearTimeout(this._resizeTimer);
-}
-```
+## Disconnect Cleanup
 
-## Common surprises
+Alongside SDK cleanup, disconnect observers, clear timers, remove tooltips,
+clear `_pendingRows` and chart-derived summaries, reset `_d3Ready`,
+`_d3LoadStarted`, `_d3Generation`, and `_d3TerminalError`, and empty imperative
+SVG containers. This prevents stale data and scripts from appearing after reconnect. Guarding
+`_handleDataUpdate` with `_d3TerminalError` prevents SDK callbacks in the same
+generation from replacing a terminal D3 failure.
 
-- **Chart renders once, then vanishes on resize.** Missing
-  `lwc:dom="manual"` on the chart container.
-- **Chart renders empty, D3 loaded fine in console.** `dataUpdate`
-  fired before D3 was ready; no `_pendingRows` buffer.
-- **Resize does nothing.** `ResizeObserver` attached in
-  `connectedCallback` when the gated container didn't exist yet.
-  Move setup into `_renderChart`.
-- **Tooltip in the wrong place / unstyled.** Scoped CSS doesn't
-  reach it — use inline `.style.*`.
-- **Console CSP error loading D3.** Static resource not deployed or
-  named something other than `d3`.
-- **SVG is blank.** Container's `getBoundingClientRect()` returns 0
-  width/height — CSS parent chain lacks `min-height: 0` on flex
-  containers.
+## Category-Heavy Charts
 
-## See also
-
-- SKILL.md — the general SDK pipeline lives in `references/sdm-table.md`;
-  D3 layers a rendering path on top of it, but everything about the
-  query itself (specs, `IDX`, subscribe-before-register) is unchanged.
-- `references/sparkline-column.md` — per-row inline sparklines using
-  this same shape.
+For a bar chart with many categories, use horizontal bars, a minimum vertical
+row budget such as 32px, and a scrollable chart region rather than overlapping
+x-axis labels. Render category and value text plus an SVG title and description
+so color is not the only channel and the graphic has a textual equivalent.

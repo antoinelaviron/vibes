@@ -1,89 +1,64 @@
-# salesforce-action-link — per-row Salesforce quick action (Build 3 pattern)
+# salesforce-action-link - Per-row Log a Call (Build 3)
 
-**What this teaches:** how to open a Salesforce standard quick action
-(Log a Call, New Task, etc.) on a record from a Tableau Next dashboard
-extension. The tricky part is that the extension runs inside
-`*--analytics.<domain>` and standard navigation from that origin fails
-silently — this pattern rewrites the origin and opens the action in a
-new tab.
+Read this after the attendee's deployed `vibeInsight` bundle. It adds the
+workshop's fixed `Global.LogACall` quick action to a new `vibeAction` bundle.
 
-**Do NOT copy this file verbatim.** The quick-action name
-(`Global.LogACall`), the ID-carrying dimension field name, and the
-`OBJ_` constants are placeholders — the real ones come from the
-attendee's SDM discovery hand-off and their org's quick-action config.
+## Query Shape
 
-## Rules
-
-- **Origin rewrite is mandatory.** `NavigationMixin` does not work
-  inside `*--analytics.<domain>`. Rewrite to `.lightning.force.com`
-  before `window.open`. See SKILL.md Gate #6.
-- **Use `window.open(url, '_blank')`,** not `NavigationMixin.Navigate`,
-  and not a same-tab redirect (the analytics iframe traps the nav).
-- **Exact quick-action name.** `Global.LogACall` — one word, no
-  underscores, `Global.` prefix. Do NOT invent `Account.LogACall` or
-  `Global.Log_a_Call`. Confirm the name in Setup → Global Actions if
-  it's not the workshop default.
-- **The ID-carrying field is a DIMENSION** (`rowGrouping: true`), and
-  it must be declared **before** any measure spec. Appending it at
-  the end of `specs[]` after a `_clc` measure produces the classic
-  Gate #8 desync — the row Proxy delivers the measure where the ID
-  should be, and the URL becomes `recordId=<dollar amount>`. See
-  SKILL.md Gate #8.
-- **Hidden column.** The ID is used for the URL, NOT rendered as a
-  visible `<td>`. Store as `row.accountId`; do not add a header cell.
-- **Use `<lightning-button-icon>`,** not `<lightning-button>` — the
-  label wraps in narrow columns and looks bad. Set
-  `alternative-text` and `title`, and pass the ID via
-  `data-account-id={row.accountId}`.
-- **Underneath**, the panel-swap from `references/apex-insight-panel.md`
-  is unchanged — this pattern *adds* a button, doesn't replace one.
-
-## Annotated snippet — the handler
-
-```javascript
-handleLogACallClick(event) {
-    const accountId = event.currentTarget.dataset.accountId;
-    if (!accountId) return;
-
-    // Rewrite origin: *--analytics.<domain>  →  <base>.lightning.force.com
-    const base = window.location.origin.replace(/--analytics\..+/, '.lightning.force.com');
-    const url  = `${base}/lightning/action/quick/Global.LogACall?recordId=${encodeURIComponent(accountId)}`;
-
-    // window.open, NOT NavigationMixin — the analytics iframe blocks the mixin silently.
-    window.open(url, '_blank');
-}
-```
-
-## Spec order — insert the ID dimension BEFORE the measure
-
-The ID-carrying spec is a **dimension** and must sit alongside the
-other dimensions, not appended at the end:
+The Account record ID is a hidden dimension. Put it before every measure, map it
+to `row.accountId`, and do not render it in a table cell. An ID placed after a
+measure desynchronizes `IDX` and can turn an amount into `recordId`.
 
 ```javascript
 const specs = [
-    // ...Build 2 dimensions (rowGrouping: true)...
-    { model: `${OBJ_OPPORTUNITY}.<id-carrying-dim-apiName>`, rowGrouping: true },  // NEW: hidden ID
-    // ...Build 2 measures (rowGrouping: false)...
-    { model: '<calc-measure-apiName>_clc', rowGrouping: false }
+    // Existing dimensions.
+    { model: `${OBJ_OPPORTUNITY}.<account-id-dimension>`, rowGrouping: true },
+    // Existing measures follow.
+    { model: '<total-amount-clc>', rowGrouping: false }
 ];
-
-// Update IDX so ACCOUNT_ID lands at its correct position — right BEFORE the last-position measure.
-const IDX = {
-    /* ...existing dims... */
-    ACCOUNT_ID: <n-1>,
-    AMOUNT:     <n>          // measure — always last
-};
 ```
 
-Symptom you'll see if you get this wrong: the Log a Call button opens
-`…?recordId=4822.56` (a dollar amount) instead of `…?recordId=001…`
-(a real 15/18-char record ID). Fix by moving the ID spec before every
-measure in the array, and rebuilding `IDX` to match.
+## Validated Action URL
 
-## Template — hidden ID, visible button
+Only a Salesforce Account ID is valid for this action: 15 or 18 alphanumeric
+characters starting with `001`. Validate it before rendering the control and in
+the click handler. The component runs in an analytics iframe, so rewrite only a
+valid analytics origin to a Lightning host and refuse to open any other target.
+
+```javascript
+_isAccountId(value) {
+    return /^001[A-Za-z0-9]{12}(?:[A-Za-z0-9]{3})?$/.test(String(value || ''));
+}
+
+_logACallUrl(accountId) {
+    if (!this._isAccountId(accountId)) return null;
+    const origin = new URL(window.location.origin);
+    const rewritten = origin.origin.replace(/--analytics\.[^.]+\..+$/, '.lightning.force.com');
+    const base = new URL(rewritten);
+    if (base.protocol !== 'https:' || !base.hostname.endsWith('.lightning.force.com')) return null;
+    return `${base.origin}/lightning/action/quick/Global.LogACall?recordId=${encodeURIComponent(accountId)}`;
+}
+
+handleLogACallClick(event) {
+    const url = this._logACallUrl(event.currentTarget.dataset.accountId);
+    if (url) window.open(url, '_blank', 'noopener');
+}
+```
+
+Use the third `window.open` argument only where the workshop's analytics iframe
+has been verified to permit it. If browser behavior rejects that feature string,
+keep the ID and origin validation and record the compatibility result.
+
+Derive `canLogCall` when mapping rows so the UI is not an always-enabled control
+that silently does nothing:
+
+```javascript
+accountId: row[IDX.ACCOUNT_ID] ?? null,
+canLogCall: this._isAccountId(row[IDX.ACCOUNT_ID])
+```
 
 ```html
-<td class="slds-text-align_center">
+<template lwc:if={row.canLogCall}>
   <lightning-button-icon
     icon-name="utility:log_a_call"
     variant="border"
@@ -92,23 +67,7 @@ measure in the array, and rebuilding `IDX` to match.
     data-account-id={row.accountId}
     onclick={handleLogACallClick}
   ></lightning-button-icon>
-</td>
+</template>
 ```
 
-The row-mapping side stashes `accountId` off the ID dimension:
-
-```javascript
-mapped.push({
-    /* ...existing row fields... */
-    accountId: r[IDX.ACCOUNT_ID],   // hidden — never rendered as a column
-    amount:    Number(r[IDX.AMOUNT]) || 0
-});
-```
-
-## See also
-
-- SKILL.md gates: **#6** (origin rewrite), **#8** (spec order — ID
-  dimension goes before measures), **#3** (SLDS-first styling).
-- `references/apex-insight-panel.md` — the panel-swap this pattern
-  layers onto.
-- `references/sdm-table.md` — the underlying query pipeline.
+Never use `NavigationMixin` here. It silently fails within the analytics iframe.
