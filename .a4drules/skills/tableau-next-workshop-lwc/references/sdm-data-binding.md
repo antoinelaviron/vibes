@@ -1,13 +1,22 @@
-# Native SDM data binding - default Build 1 pattern
+# Native SDM data binding
 
-Use this pattern for every SDM-backed workshop extension unless the attendee
-explicitly asks for the hard-coded recovery build. Native data binding lets the
-dashboard author select a semantic model and map role-oriented fields without
-editing or redeploying the LWC.
+Use this pattern for every data-backed workshop extension unless the attendee
+explicitly selects hard-coded recovery mode. Native binding lets a dashboard
+author map prompt-derived semantic roles without editing the generated LWC.
 
-## Binding contract
+## Contents
 
-The dashboard runtime supplies these guaranteed objects:
+- [Runtime values](#runtime-values)
+- [Role contract](#role-contract)
+- [Compile the contract](#compile-the-contract)
+- [Query and row contract](#query-and-row-contract)
+- [Binding-aware controller](#binding-aware-controller)
+- [Events and interactions](#events-and-interactions)
+- [Compatibility and release gate](#compatibility-and-release-gate)
+
+## Runtime values
+
+The dashboard runtime supplies these objects:
 
 ```javascript
 // SemanticModel
@@ -21,36 +30,83 @@ The dashboard runtime supplies these guaranteed objects:
 ```
 
 A model-level calculated field can have a bare `name`, such as
-`Total_Amount_clc`. Read these objects directly. Do not accept string
-fallbacks, derive labels from `name`, or substitute hard-coded API names when a
-property is undefined.
+`Total_Value_clc`. Read these shapes directly. Do not accept string fallbacks,
+derive labels from `name`, or substitute a hard-coded API name when a binding
+is missing.
 
-Build 1 uses these required roles:
+The picker may expose aggregations that the registered-query API cannot map.
+Support `Sum`, `Average`, `Min`, `Max`, `Median`, `Count`, `CountDistinct`,
+`StdDev`, `Var`, `VarP`, and `UserAgg`. Reject another selected value as a
+configuration error instead of silently changing it.
 
-| Property | Type | Role |
-|---|---|---|
-| `sdmName` | `SemanticModel` | Model to query |
-| `opportunityIdField` | `SemanticDimension` | Stable row identifier |
-| `accountNameField` | `SemanticDimension` | Account display value |
-| `stageField` | `SemanticDimension` | Opportunity stage |
-| `closeDateField` | `SemanticDimension` | Close date |
-| `typeField` | `SemanticDimension` | Opportunity type |
-| `amountField` | `SemanticMeasure` | Amount and aggregation |
+## Role contract
 
-The picker may expose aggregations that the current SDK does not map correctly.
-Generate components only for `Sum`, `Average`, `Min`, `Max`, `Median`,
-`Count`, `CountDistinct`, `StdDev`, `Var`, `VarP`, and `UserAgg`. Reject other
-selected values with a configuration error rather than silently changing them
-to Sum.
+Derive the contract from the attendee's prompt before writing metadata or JS.
+Use it to generate code; do not expose it as a runtime JSON property.
 
-Builds 2 and 3 preserve every inherited property name and type. Build 3 creates
-a new `vibeAction` bundle and adds required
-`accountIdField: SemanticDimension` to that bundle's initial contract.
+```javascript
+const COMPONENT_CONTRACT = {
+    entity: { singularLabel: 'Case', pluralLabel: 'Cases' },
+    roles: [
+        {
+            key: 'caseNumber',
+            propertyName: 'caseNumberField',
+            bindingType: 'SemanticDimension',
+            pickerLabel: 'Case Number',
+            purpose: 'Case number displayed in each row.',
+            required: true,
+            visible: true,
+            valueKind: 'text',
+            behaviors: ['rowIdentity', 'primaryLabel', 'insightContext']
+        },
+        {
+            key: 'customerName',
+            propertyName: 'customerNameField',
+            bindingType: 'SemanticDimension',
+            pickerLabel: 'Customer',
+            purpose: 'Customer name displayed in each row.',
+            required: true,
+            visible: true,
+            valueKind: 'text',
+            behaviors: ['insightContext']
+        },
+        {
+            key: 'ageDays',
+            propertyName: 'ageDaysField',
+            bindingType: 'SemanticMeasure',
+            pickerLabel: 'Case Age',
+            purpose: 'Case age used for display and sorting.',
+            required: true,
+            visible: true,
+            valueKind: 'number',
+            behaviors: ['primarySort', 'insightContext']
+        }
+    ],
+    displayOrder: ['caseNumber', 'customerName', 'ageDays'],
+    sort: { roleKey: 'ageDays', direction: 'desc', scope: 'returnedRows' },
+    limit: 25
+};
+```
 
-## Metadata
+This is a worked shape, not a fixed Case schema. Replace every business role
+from the attendee's prompt. Preserve these invariants:
 
-Use API version 67.0. `sdk` is runtime-injected and must never appear
-as a metadata property.
+- One `sdmName: SemanticModel` property.
+- One static semantic property per confirmed role.
+- A stable row identity role or confirmed deterministic composite.
+- Explicit visible/hidden status and display order.
+- Explicit formatting for currency, percentage, duration, and date roles.
+- Explicit sorting semantics, including whether sorting applies only to the
+  returned rows.
+- No fabricated measure, action ID, filter role, or insight context.
+
+## Compile the contract
+
+### Metadata
+
+Generate one property per role under the dashboard target. Property labels and
+descriptions explain business purpose; they must not expose implementation
+terms such as `role1` or `fieldA`.
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -58,7 +114,7 @@ as a metadata property.
     <apiVersion>67.0</apiVersion>
     <isExposed>true</isExposed>
     <masterLabel>Vibe Table</masterLabel>
-    <description>Opportunity table with dashboard-configured semantic data bindings.</description>
+    <description>Case table with dashboard-configured semantic roles.</description>
     <targets>
         <target>analytics__Dashboard</target>
     </targets>
@@ -66,88 +122,34 @@ as a metadata property.
         <targetConfig targets="analytics__Dashboard">
             <property name="sdmName" type="SemanticModel"
                 label="Semantic Model" description="Model to query." required="true" />
-            <property name="opportunityIdField" type="SemanticDimension"
-                label="Opportunity ID" description="Stable opportunity identifier used for row identity." required="true" />
-            <property name="accountNameField" type="SemanticDimension"
-                label="Account" description="Account name displayed in the table." required="true" />
-            <property name="stageField" type="SemanticDimension"
-                label="Stage" description="Opportunity stage displayed in the table." required="true" />
-            <property name="closeDateField" type="SemanticDimension"
-                label="Close Date" description="Opportunity close date displayed in the table." required="true" />
-            <property name="typeField" type="SemanticDimension"
-                label="Opportunity Type" description="Opportunity type displayed in the table." required="true" />
-            <property name="amountField" type="SemanticMeasure"
-                label="Amount" description="Measure used to rank the returned opportunities." required="true" />
+            <property name="caseNumberField" type="SemanticDimension"
+                label="Case Number" description="Case number displayed in each row." required="true" />
+            <property name="customerNameField" type="SemanticDimension"
+                label="Customer" description="Customer name displayed in each row." required="true" />
+            <property name="ageDaysField" type="SemanticMeasure"
+                label="Case Age" description="Case age used for display and sorting." required="true" />
         </targetConfig>
     </targetConfigs>
 </LightningComponentBundle>
 ```
 
-Use bound `.label` values for column headings and accessible names. Property
-labels describe roles (for example, "Group-by Dimension"), not JavaScript
-variable names.
+The example above is the compiled result of the example contract. Generate a
+different property list for a different prompt. `sdk` is runtime-injected and
+must never appear as a metadata property.
 
-## Query strategy
+### JavaScript accessors
 
-Data binding supplies the query inputs; it does not change the query transport.
-Use `registerFieldsForQuery` so the dashboard runtime owns the query and
-automatically applies current filters and parameters. Do not switch to
-`fetchDataUsingQueryAndSource` merely because fields are bound.
-
-Build specs in this order:
-
-1. Every dimension with `rowGrouping: true`.
-2. Every measure with `rowGrouping: false`.
-
-For a qualified raw measure, pass the bound aggregation after normalization.
-For a bare model-level calculated measure, omit `aggregationType` because the
-semantic model owns it. Native `SemanticMeasure` bindings do not expose
-semantic metrics; keep metric handling in verified hard-coded/manual paths.
-
-```javascript
-function normalizeAggregation(value) {
-    const key = String(value || '').replace(/[\s_-]/g, '').toLowerCase();
-    const values = {
-        sum: 'Sum', average: 'Average', avg: 'Average', min: 'Min', max: 'Max',
-        median: 'Median', count: 'Count', countdistinct: 'CountDistinct',
-        stddev: 'StdDev', var: 'Var', varp: 'VarP', useragg: 'UserAgg'
-    };
-    return values[key] || null;
-}
-
-function measureSpec(binding) {
-    const spec = { model: binding.name, rowGrouping: false };
-    if (!binding.name.includes('.')) return spec;
-
-    const aggregationType = normalizeAggregation(binding.aggregation);
-    if (!aggregationType) {
-        throw new Error(`Unsupported measure aggregation: ${binding.aggregation}`);
-    }
-    return { ...spec, aggregationType };
-}
-```
-
-Keep the exact final `specs[]` order as the row index contract. The SDK returns
-array-like Proxy rows and groups dimensions before measures.
-
-## Binding-aware controller
-
-The runtime can assign `sdk` and binding properties after `connectedCallback`,
-and it can replace bindings while the author edits the widget. A one-shot
-`_pipelineStarted` guard is therefore not sufficient.
-
-Use private-backed `@api` accessors. Each setter schedules one synchronization
-microtask. A stable signature suppresses duplicate registration when the
-runtime assigns equivalent object instances.
+Generate a private-backed accessor for `sdk`, `sdmName`, and every role. Each
+setter schedules one synchronization microtask because the runtime can assign
+values after `connectedCallback` and can replace equivalent object instances.
 
 ```javascript
 @api
-get sdmName() { return this._sdmName; }
-set sdmName(value) { this._sdmName = value; this._scheduleBindingSync(); }
-
-@api
-get amountField() { return this._amountField; }
-set amountField(value) { this._amountField = value; this._scheduleBindingSync(); }
+get caseNumberField() { return this._caseNumberField; }
+set caseNumberField(value) {
+    this._caseNumberField = value;
+    this._scheduleBindingSync();
+}
 
 @api
 get sdk() { return this._sdk; }
@@ -165,7 +167,145 @@ set sdk(value) {
     }
     this._scheduleBindingSync();
 }
+```
 
+Do not attempt to create `@api` properties dynamically. LWC metadata and class
+accessors are static; the generator emits the confirmed list.
+
+## Query and row contract
+
+Data binding supplies query inputs, not a different transport. Use
+`registerFieldsForQuery` so the dashboard runtime owns fetching and applies its
+current filters and parameters. Do not switch to
+`fetchDataUsingQueryAndSource` merely because the fields are bound.
+
+```javascript
+function normalizeAggregation(value) {
+    const key = String(value || '').replace(/[\s_-]/g, '').toLowerCase();
+    const values = {
+        sum: 'Sum', average: 'Average', avg: 'Average', min: 'Min', max: 'Max',
+        median: 'Median', count: 'Count', countdistinct: 'CountDistinct',
+        stddev: 'StdDev', var: 'Var', varp: 'VarP', useragg: 'UserAgg'
+    };
+    return values[key] || null;
+}
+
+function measureSpecFromBinding(binding) {
+    const spec = { model: binding.name, rowGrouping: false };
+    if (!binding.name.includes('.')) return spec;
+
+    const aggregationType = normalizeAggregation(binding.aggregation);
+    if (!aggregationType) {
+        throw new Error(`Unsupported measure aggregation: ${binding.aggregation}`);
+    }
+    return { ...spec, aggregationType };
+}
+```
+
+For a qualified raw measure, include the normalized selected aggregation. For
+a bare model-level calculated measure, omit `aggregationType`; the semantic
+model owns it. Native `SemanticMeasure` bindings do not expose semantic metrics,
+so keep metrics in a verified hard-coded/manual-query path.
+
+Generate a compact role descriptor alongside the static accessors:
+
+```javascript
+const ROLE_DEFINITIONS = [
+    { key: 'caseNumber', propertyName: 'caseNumberField', pickerLabel: 'Case Number', kind: 'dimension', required: true, visible: true },
+    { key: 'customerName', propertyName: 'customerNameField', pickerLabel: 'Customer', kind: 'dimension', required: true, visible: true },
+    { key: 'ageDays', propertyName: 'ageDaysField', pickerLabel: 'Case Age', kind: 'measure', required: true, visible: true }
+];
+```
+
+Compile the active configuration from bound values. Always build dimensions
+before measures, regardless of display order:
+
+```javascript
+_bindingConfiguration() {
+    const activeRoles = ROLE_DEFINITIONS.map((role) => ({
+        ...role,
+        binding: this[role.propertyName]
+    }));
+    const missing = [
+        !this.sdmName?.apiName && 'Semantic Model',
+        ...activeRoles.map((role) =>
+            role.required && !role.binding?.name && role.pickerLabel
+        )
+    ].filter(Boolean);
+    if (missing.length) return { missing };
+
+    const mappedRoles = activeRoles.filter((role) => role.binding?.name);
+    const dimensions = mappedRoles.filter((role) => role.kind === 'dimension');
+    const measures = mappedRoles.filter((role) => role.kind === 'measure');
+    const orderedRoles = [...dimensions, ...measures];
+    const specs = orderedRoles.map((role) =>
+        role.kind === 'dimension'
+            ? { model: role.binding.name, rowGrouping: true }
+            : measureSpecFromBinding(role.binding)
+    );
+
+    return {
+        sourceName: this.sdmName.apiName,
+        orderedRoles,
+        specs,
+        labelsByRole: Object.fromEntries(
+            mappedRoles.map((role) => [role.key, role.binding.label])
+        ),
+        indexByRole: Object.fromEntries(
+            orderedRoles.map((role, index) => [role.key, index])
+        )
+    };
+}
+```
+
+Keep the exact final `orderedRoles` and `specs` order as the row-index contract.
+The SDK returns array-like Proxy rows and groups all dimensions before all
+measures.
+
+Map row values by role rather than by business-specific properties:
+
+```javascript
+_mapRow(rawRow, index) {
+    const values = {};
+    for (const role of this._orderedRoles) {
+        values[role.key] = rawRow[this._indexByRole[role.key]] ?? null;
+    }
+    const identity = values[ROW_IDENTITY_ROLE];
+    return {
+        rowKey: `row-${index}-${String(identity ?? '')}`,
+        values,
+        displayValues: this._formatRoleValues(values)
+    };
+}
+```
+
+If one role is not a stable identity, use a prompt-confirmed deterministic
+composite. Never use `Math.random()` or an index alone.
+
+Render visible fields through generated cells in the prompt-derived display
+order. Use bound labels for headers. Use a date-only branch for Salesforce date
+values:
+
+```javascript
+function formatDate(value) {
+    if (!value) return '';
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+        const [year, month, day] = value.split('-').map(Number);
+        return new Date(year, month - 1, day).toLocaleDateString(undefined, {
+            year: 'numeric', month: 'short', day: 'numeric'
+        });
+    }
+    return new Date(value).toLocaleDateString();
+}
+```
+
+## Binding-aware controller
+
+Use a synchronization controller instead of a one-shot pipeline. Bindings can
+arrive after construction, and equivalent assignments must not duplicate a
+registration.
+
+```javascript
 connectedCallback() {
     this._connected = true;
     this._scheduleBindingSync();
@@ -186,6 +326,7 @@ disconnectedCallback() {
     this._unsubscribes = [];
     this._subscribedSdk = null;
     clearTimeout(this._loadingTimer);
+    this._invalidateFeatureState();
 }
 
 _scheduleBindingSync() {
@@ -196,56 +337,27 @@ _scheduleBindingSync() {
         this._syncBindings();
     });
 }
+
+_isCurrentRun(generation) {
+    return this._connected && generation === this._runGeneration;
+}
 ```
 
-Apply this pattern to every required property, including `sdk`. In `_syncBindings`:
+In `_syncBindings`:
 
 1. Return when disconnected or `sdk` is absent.
 2. Emit `init` once when the SDK first becomes usable.
-3. Subscribe once for the current SDK instance.
-4. Validate every required binding.
-5. If incomplete, show a configuration message, issue no query, and emit a
-   terminal `error` lifecycle event so the host does not remain loading.
-6. Build a signature from source API name, field names, measure aggregation,
-   and limit.
+3. Install subscriptions once for the current SDK instance.
+4. Compile and validate every required binding.
+5. If incomplete, issue no query, clear stale rows and feature state, show a
+   configuration message, and emit terminal `error`.
+6. Build a signature from source, specs, and limit.
 7. Return if the signature already matches the active registration.
-8. Invalidate stale UI and asynchronous Build 2 work.
-9. Set loading, then call `registerFieldsForQuery`; it registers the source
-   internally in the current SDK.
+8. Invalidate stale insight/action state.
+9. Save the role order, indexes, and labels.
+10. Start loading before `registerFieldsForQuery`.
 
 ```javascript
-_bindingConfiguration() {
-    const dimensions = [
-        ['opportunityId', this.opportunityIdField],
-        ['accountName', this.accountNameField],
-        ['stage', this.stageField],
-        ['closeDate', this.closeDateField],
-        ['type', this.typeField]
-    ];
-    const missing = [
-        !this.sdmName?.apiName && 'Semantic Model',
-        ...dimensions.map(([key, field]) => !field?.name && key),
-        !this.amountField?.name && 'amount'
-    ].filter(Boolean);
-    if (missing.length) return { missing };
-
-    const specs = [
-        ...dimensions.map(([, field]) => ({ model: field.name, rowGrouping: true })),
-        measureSpec(this.amountField)
-    ];
-    return {
-        sourceName: this.sdmName.apiName,
-        specs,
-        labels: {
-            accountName: this.accountNameField.label,
-            stage: this.stageField.label,
-            closeDate: this.closeDateField.label,
-            type: this.typeField.label,
-            amount: this.amountField.label
-        }
-    };
-}
-
 _bindingSignature(config) {
     return JSON.stringify({
         sourceName: config.sourceName,
@@ -273,9 +385,9 @@ _syncBindings() {
         this._registrationInFlight = false;
         this._isQueryRegistered = false;
         this._queryKeys = [];
+        clearTimeout(this._loadingTimer);
         this.rows = [];
         this._invalidateFeatureState();
-        clearTimeout(this._loadingTimer);
         this._showConfigurationMessage(config.missing);
         return;
     }
@@ -284,12 +396,14 @@ _syncBindings() {
     if (signature === this._activeBindingSignature) return;
     this._desiredBindingSignature = signature;
     if (this._registrationInFlight) return;
+
     this._registrationInFlight = true;
     this._activeBindingSignature = signature;
     const generation = ++this._runGeneration;
-
     this._queryKeys = config.specs.map((spec) => spec.model);
-    this._labels = config.labels;
+    this._orderedRoles = config.orderedRoles;
+    this._indexByRole = config.indexByRole;
+    this._labelsByRole = config.labelsByRole;
     this._invalidateFeatureState();
     this._setLoadingState({ preserveRows: false });
     this._isQueryRegistered = true;
@@ -301,39 +415,33 @@ _syncBindings() {
         if (generation !== this._runGeneration) return;
     } catch (error) {
         if (generation !== this._runGeneration) return;
-        this._isQueryRegistered = false;
         this._registrationInFlight = false;
+        this._isQueryRegistered = false;
         this._activeBindingSignature = '';
         this._showError(String(error?.message || error));
     }
 }
 ```
 
-`registerFieldsForQuery` internally fetches and emits `dataUpdate`. Subscribe
-before the first registration and never call `fetchData()` immediately after
-registration. `dataUpdate` remains the only data ingestion path.
+`registerFieldsForQuery` fetches internally and emits `dataUpdate`. Subscribe
+before the first registration. Never call `fetchData()` immediately after it.
 
-If the author changes bindings while a registration is in flight, store only
-the latest desired signature. In `_handleDataUpdate`, compare it with the
-active signature. When they differ, ignore those obsolete rows, clear
-`_registrationInFlight`, and schedule synchronization for the latest bindings.
-When they match, clear `_registrationInFlight` and process the rows. The event
-does not carry a source token, so generation checks around the synchronous
-register call alone cannot prevent an older response from overwriting newer
-bindings.
-
-This queue is a best-effort guard, not proof that in-place rebinding is safe.
-`dataUpdate` does not identify the query that produced it, so overlapping old
-filter refreshes can still arrive after a new registration. Until the live gate
-proves cancellation/order or the SDK adds event attribution, treat retargeting
-as requiring the dashboard runtime to remount the component. Do not advertise
-in-place rebinding as supported workshop behavior.
+If bindings change while registration is in flight, retain only the newest
+desired signature. An event has no query token, so ignore rows when desired and
+active signatures differ, clear the active registration, and schedule the
+newest configuration:
 
 ```javascript
 _handleDataUpdate(rows) {
     if (!this._isQueryRegistered) return;
     this._registrationInFlight = false;
-    if (rows === undefined) return; // SDK already published the query error.
+    if (rows === undefined) {
+        this._isQueryRegistered = false;
+        this._activeBindingSignature = '';
+        clearTimeout(this._loadingTimer);
+        this._showError('Unable to load data. Please retry.');
+        return;
+    }
     if (this._desiredBindingSignature !== this._activeBindingSignature) {
         this._activeBindingSignature = '';
         this._scheduleBindingSync();
@@ -343,7 +451,12 @@ _handleDataUpdate(rows) {
 }
 ```
 
-## Events and lifecycle
+This queue is best-effort only. `dataUpdate` cannot identify its query, so an
+old filter refresh can still overlap a new registration. Until a live gate
+proves cancellation or attribution, require the dashboard runtime to remount
+for retargeting. Do not advertise in-place rebinding.
+
+## Events and interactions
 
 Install subscriptions once per SDK instance:
 
@@ -352,9 +465,7 @@ _ensureSubscriptions() {
     if (this._subscribedSdk === this.sdk || typeof this.sdk.on !== 'function') return;
     this._unsubscribes.forEach((unsubscribe) => unsubscribe?.());
     this._unsubscribes = [
-        this.sdk.on('dataUpdate', (rows) => {
-            if (this._isQueryRegistered) this._handleDataUpdate(rows);
-        }),
+        this.sdk.on('dataUpdate', (rows) => this._handleDataUpdate(rows)),
         this.sdk.on('filterChange', (payload) => {
             if (this._isQueryRegistered && this._isFilterRelevant(payload)) {
                 this._invalidateFeatureState();
@@ -372,55 +483,47 @@ _ensureSubscriptions() {
 }
 ```
 
-- `filterChange` and `parameterChange` are UI-only. The registered query
-  refetches internally; never call `fetchData()` from these handlers.
-- Derive filter relevance from exact active bound field names or their exact
-  object segment. Do not use a broad prefix such as `startsWith('Account')`.
-- Emit `init` once per SDK connection, then always reach `loaded`, `nodata`, or
-  `error`. Do not emit `init` during rebinding or ordinary refreshes.
-- A filter timeout may restore the last valid rows. A binding-change timeout
-  must not restore rows from the previous model.
+- `filterChange` and `parameterChange` are UI-only. Never call `fetchData()`.
+- Derive filter relevance from exact active field names or exact object names.
+- Emit `init` once per connection, then reach `loaded`, `nodata`, or `error`.
+- A filter timeout may restore prior valid rows. A binding-change timeout must
+  never restore rows from another model.
 
-## Publishing a bound filter
-
-When a generated visualization publishes selection, use the raw selected value
-and the configured model and dimension:
+Publish a filter only when the prompt requests the interaction. Resolve the
+field from the configured role instead of assuming a stage-like role:
 
 ```javascript
+const filterRole = this._orderedRoles.find(
+    (role) => role.key === PUBLISH_FILTER_ROLE
+);
 this.sdk.actions.applyFilter({
-    fieldOrFields: this.stageField.name,
-    values: [selectedStage],
+    fieldOrFields: filterRole.binding.name,
+    values: [selectedRawValue],
     operator: 'In',
     dataSourceName: this.sdmName.apiName
 });
 ```
 
-Interactive marks must also be keyboard operable, have a visible focus state,
-and expose selection state with a native control or appropriate ARIA state.
+Interactive marks must be keyboard operable, visibly focusable, and expose a
+programmatic name and selection state. Hover-only tooltips are insufficient.
 
-## Compatibility rule
+## Compatibility and release gate
 
 Dashboard mappings persist property names and types. Never rename, remove,
-repurpose, or change the type of a shipped binding. Add a new optional property
-or create a new component bundle. If platform validation fails while removing
-old metadata, use the two-step target-detachment workaround documented in
-SKILL.md; do not delete the deployed component as a first response.
+repurpose, change the type of, or change the requiredness of a shipped binding.
+Create a new component bundle when the business contract changes.
 
-## Live release gate
+Before switching workshop materials, verify in a live dashboard:
 
-Before switching the workshop manual, verify in a live dashboard that:
+1. Semantic pickers return the documented object shapes.
+2. Every complete role mapping registers and renders the expected columns.
+3. Dimension/measure ordering matches the positional role indexes.
+4. External filters change rows without explicit fetching.
+5. Clearing a binding returns to configuration state without stale rows.
+6. Retargeting remounts the component, or cancellation/attribution is proved.
+7. A requested bound filter updates compatible native visualizations.
+8. Visible and accessible labels use prompt or bound-field language.
 
-1. Semantic property pickers appear and return the documented object shapes.
-2. A complete mapping registers and renders rows.
-3. Retargeting remounts the component, or the SDK proves that prior requests
-   are cancelled/attributed before a second registration becomes active.
-4. An external dashboard filter changes the rows without an explicit fetch.
-5. Retargeting to another model with different field names works without a
-   redeploy.
-6. Clearing a binding returns to configuration state without stale rows.
-7. `applyFilter` uses the bound source and dimension and updates compatible
-   native visualizations.
-
-If item 3 fails, disable in-place retargeting and keep data binding limited to
-the initial mapping/remount path. Do not switch to one-off fetching until its
-dashboard-filter behavior is independently proven.
+If metadata validation fails while replacing an old target shape, use the
+two-step target-detachment deploy described in `SKILL.md`. That workaround does
+not make an incompatible persisted property change safe.

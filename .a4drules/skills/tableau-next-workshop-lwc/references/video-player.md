@@ -11,9 +11,16 @@ configured entirely from the dashboard property panel. It auto-detects
 whether the configured URL is a YouTube link or a direct MP4 and
 switches the rendered element (`<iframe>` vs `<video>`) accordingly.
 
+## Contents
+
+- [Rules](#rules)
+- [Annotated snippet](#annotated-snippet--url-detection--mode-switch)
+- [Common surprises](#common-surprises)
+- [See also](#see-also)
+
 **This is the one workshop pattern that skips SDM discovery.** Every
 other reference in this skill starts from a `registerFieldsForQuery`
-pipeline (Gate #2, #7). This one has nothing to discover — do not call
+pipeline. This one has nothing to discover — do not call
 `tableau-next-workshop-sdm-discovery` for this pattern, and do not add
 an `@api sdk` property. If the attendee's prompt asks for the video
 tile to *also* show data (e.g. "and put the opportunity count next to

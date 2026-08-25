@@ -1,167 +1,361 @@
-# sdm-table - hard-coded recovery pattern
+# Hard-coded recovery query
 
-**Recovery mode only.** Native data binding is the default Build 1 path; read
-`references/sdm-data-binding.md` first. Use this file only when the attendee
-explicitly asks for the basic hard-coded wire contract or needs recovery.
+Use this reference only when the attendee explicitly requests recovery mode.
+Native data binding remains the default. Recovery compiles the same confirmed
+prompt-derived role contract into source and field constants after live SDM
+discovery.
 
-**What this teaches:** how to render a table inside an
-`analytics__Dashboard` LWC whose rows come from a semantic data model
-and re-fetch automatically whenever a dashboard filter or parameter
-changes. This is the foundation every build in the workshop layers on
-top of.
+## Contents
 
-**Do NOT copy this file verbatim into `force-app/…`.** Every apiName,
-`SOURCE_NAME`, and object constant is a placeholder — the real values
-come from the discovery hand-off JSON produced by
-`tableau-next-workshop-sdm-discovery` in the current session.
+- [Required handoff](#required-handoff)
+- [Query rules](#query-rules)
+- [Compile the confirmed roles](#compile-the-confirmed-roles)
+- [Recovery pipeline](#recovery-pipeline)
+- [Verification](#verification)
 
-## Rules
+## Required handoff
 
-- **Registered SDK pipeline** — subscribe and set loading before
-  `registerFieldsForQuery`. The method registers the source and fetches data
-  internally. Do not call a private `registerDataSource` method.
-- **`registerFieldsForQuery`, never `fetchDataUsingQueryAndSource`.**
-  Only the register-fields path lets the dashboard runtime inject
-  filter/parameter context on refetch. See SKILL.md Gate #7.
-- **Spec order: all dimensions first, all measures last.** The SDK
-  silently reorders columns so `rowGrouping: true` specs come first —
-  interleaved specs desync your `IDX` map by one column and the
-  classic symptom is a numeric value showing up where a text ID
-  should be. See SKILL.md Gate #8.
-- **`_clc` / `_mtc` fields:** bare `model: 'MyCalc_clc'` (no
-  `Object.` prefix), and **omit `aggregationType`** — the SDM already
-  owns aggregation. Setting one triggers *"Summary formula cannot
-  have aggregation method different than NONE/AUTO/USER_AGG"*.
-- **`DATA_UPDATE` is the only data path.** `filterChange` and
-  `parameterChange` are UI-only signals — set a loading flag, never
-  call `fetchData()`. See SKILL.md Gate #7.
-- **Subscribe before register.** `DATA_UPDATE` can fire synchronously
-  inside `registerFieldsForQuery`; wiring the listener after the call
-  loses the initial payload.
-- **Rows are positional array-like Proxies.** `Array.isArray(row)` is
-  `false` but `row[i]` and `row.length` work. Access by `IDX` only.
-- **`for:each` `key` cannot be the index alone** (LWC1065). Compose
-  a stable `rowKey` from index + a stable field.
+Do not write query code until `tableau-next-workshop-sdm-discovery` returns and
+the attendee confirms a handoff shaped like this:
 
-## Annotated snippet — the pipeline
-
-```javascript
-async _runPipeline() {
-    // 1. Lifecycle: init.
-    this.sdk.actions?.notifyLifecycleChange?.('init');
-
-    // 2. Build specs: dims FIRST, measures LAST. Gate #8.
-    const specs = [
-        { model: `${OBJ_OPPORTUNITY}.<dim-apiName>`, rowGrouping: true  },
-        { model: `${OBJ_ACCOUNT}.<dim-apiName>`,     rowGrouping: true  },
-        { model: '<calc-measure-apiName>_clc',       rowGrouping: false }
-        // NO aggregationType on _clc — SDM owns it.
-    ];
-
-    // 3. Subscribe and set loading BEFORE register.
-    this._subscribeEvents();
-    this._setLoadingState();
-
-    // 4. Register — SDK registers the source, fetches, and auto-refetches.
-    this.sdk.registerFieldsForQuery(specs, SOURCE_NAME, { limit: QUERY_LIMIT });
+```json
+{
+  "sourceName": "verified semantic model API name",
+  "limit": 25,
+  "roles": [
+    {
+      "key": "recordIdentity",
+      "kind": "dimension",
+      "model": "Object.Verified_Dimension",
+      "label": "Record ID",
+      "visible": false,
+      "valueKind": "text",
+      "behaviors": ["rowIdentity"]
+    },
+    {
+      "key": "primaryLabel",
+      "kind": "dimension",
+      "model": "Object.Verified_Label",
+      "label": "Record",
+      "visible": true,
+      "valueKind": "text",
+      "behaviors": ["primaryLabel"]
+    },
+    {
+      "key": "score",
+      "kind": "measure",
+      "model": "Object.Verified_Measure",
+      "aggregationType": "Sum",
+      "label": "Score",
+      "visible": true,
+      "valueKind": "number",
+      "behaviors": ["primarySort"]
+    }
+  ],
+  "displayOrder": ["primaryLabel", "score"]
 }
 ```
 
-## Full placeholder-ified pattern
+This example describes the handoff structure, not fields to copy. Every source,
+role, model string, aggregation, label, visibility decision, and ordering value
+must come from the confirmed prompt and live discovery.
 
-Every `<placeholder>` token below MUST be replaced from the discovery
-hand-off. Do **not** copy this file wholesale.
+## Query rules
+
+- Subscribe and enter loading before `registerFieldsForQuery`; registration
+  may emit `dataUpdate` synchronously.
+- Use `registerFieldsForQuery`, not `fetchDataUsingQueryAndSource`, so dashboard
+  filters and parameters remain runtime-owned.
+- Order every dimension before every measure. Interleaving silently changes
+  returned column positions.
+- Use bare model names for model-level calculated dimensions, measurements, and
+  metrics. Omit `aggregationType` for bare calculated measures.
+- Include a verified aggregation for a qualified raw measure.
+- Treat `dataUpdate` as the only row input. Filter and parameter handlers only
+  update UI state.
+- Read positional array-like Proxy rows through role indexes. Do not depend on
+  `Array.isArray(row)`.
+- Build a stable row key from the confirmed identity role or deterministic
+  composite, never from an index alone.
+
+## Compile the confirmed roles
+
+The emitted constants contain only values from the handoff:
+
+```javascript
+const SOURCE_NAME = '<verified-sdm-api-name>';
+const QUERY_LIMIT = 25;
+const LOADING_SAFETY_MS = 8000;
+
+const ROLE_DEFINITIONS = [
+    {
+        key: '<identity-role-key>',
+        kind: 'dimension',
+        model: '<verified-qualified-or-bare-dimension>',
+        visible: false,
+        valueKind: 'text'
+    },
+    {
+        key: '<label-role-key>',
+        kind: 'dimension',
+        model: '<verified-qualified-or-bare-dimension>',
+        visible: true,
+        valueKind: 'text'
+    },
+    {
+        key: '<measure-role-key>',
+        kind: 'measure',
+        model: '<verified-qualified-or-bare-measure>',
+        aggregationType: '<verified-aggregation>',
+        visible: true,
+        valueKind: 'number'
+    }
+];
+```
+
+Compile role order, specs, and indexes from the same array so they cannot drift:
+
+```javascript
+function compileQuery(roleDefinitions) {
+    const dimensions = roleDefinitions.filter((role) => role.kind === 'dimension');
+    const measures = roleDefinitions.filter((role) => role.kind === 'measure');
+    const orderedRoles = [...dimensions, ...measures];
+    const specs = orderedRoles.map((role) => {
+        if (role.kind === 'dimension') {
+            return { model: role.model, rowGrouping: true };
+        }
+        const spec = { model: role.model, rowGrouping: false };
+        if (!role.model.includes('.')) return spec;
+        if (!role.aggregationType) {
+            throw new Error(`Missing aggregation for ${role.key}`);
+        }
+        return { ...spec, aggregationType: role.aggregationType };
+    });
+    const indexByRole = Object.fromEntries(
+        orderedRoles.map((role, index) => [role.key, index])
+    );
+    return { orderedRoles, specs, indexByRole };
+}
+```
+
+This removes the failure mode where a hand-written six-entry index map is used
+with a three-field query.
+
+## Recovery pipeline
 
 ```javascript
 import { LightningElement, api, track } from 'lwc';
 
-const SDK_EVENTS = { DATA_UPDATE: 'dataUpdate', FILTER_CHANGE: 'filterChange', PARAMETER_CHANGE: 'parameterChange' };
-const LIFE_CYCLE = { INIT: 'init', LOADED: 'loaded', ERROR: 'error', NO_DATA: 'nodata' };
-
-const SOURCE_NAME     = '<sdm-apiName-from-discovery>';
-const OBJ_OPPORTUNITY = '<object-apiName-from-discovery>';
-const OBJ_ACCOUNT     = '<object-apiName-from-discovery>';
-const QUERY_LIMIT     = 25;
-const LOADING_SAFETY_MS = 8000;
-
-// IDX order MUST match specs[] order: dims first, measures last.
-const IDX = { OPPORTUNITY_ID: 0, ACCOUNT_NAME: 1, STAGE: 2, CLOSE_DATE: 3, TYPE: 4, AMOUNT: 5 };
+const SDK_EVENTS = {
+    DATA_UPDATE: 'dataUpdate',
+    FILTER_CHANGE: 'filterChange',
+    PARAMETER_CHANGE: 'parameterChange'
+};
+const LIFE_CYCLE = {
+    INIT: 'init', LOADED: 'loaded', ERROR: 'error', NO_DATA: 'nodata'
+};
 
 export default class VibeTable extends LightningElement {
     @api sdk;
-    @track rows = []; @track _isLoading = true; @track _hasError = false; @track _errorMessage = '';
-    _pipelineStarted = false; _isQueryRegistered = false; _unsubscribes = []; _loadingTimer = null;
+    @track rows = [];
+    @track _isLoading = true;
+    @track _hasError = false;
+    @track _hasNoData = false;
+    @track _errorMessage = '';
 
-    connectedCallback() { this._tryStartPipeline(); }
-    renderedCallback()  { this._tryStartPipeline(); }
+    _connected = false;
+    _pipelineStarted = false;
+    _pipelineGeneration = 0;
+    _isQueryRegistered = false;
+    _unsubscribes = [];
+    _loadingTimer;
+
+    connectedCallback() {
+        this._connected = true;
+        this._tryStartPipeline();
+    }
+
+    renderedCallback() {
+        this._tryStartPipeline();
+    }
+
     disconnectedCallback() {
-        this._unsubscribes.forEach((u) => typeof u === 'function' && u());
-        if (this._loadingTimer) clearTimeout(this._loadingTimer);
+        this._connected = false;
+        this._pipelineGeneration += 1;
+        this._pipelineStarted = false;
+        this._isQueryRegistered = false;
+        this._unsubscribes.forEach((unsubscribe) => unsubscribe?.());
+        this._unsubscribes = [];
+        clearTimeout(this._loadingTimer);
     }
+
     _tryStartPipeline() {
-        if (this._pipelineStarted || !this.sdk) return;
+        if (this._pipelineStarted || !this._connected || !this.sdk) return;
         this._pipelineStarted = true;
-        this._runPipeline();
+        const generation = ++this._pipelineGeneration;
+        this._runPipeline(generation);
     }
-    async _runPipeline() {
+
+    _runPipeline(generation) {
         try {
             this.sdk.actions?.notifyLifecycleChange?.(LIFE_CYCLE.INIT);
-            const specs = [
-                { model: `${OBJ_OPPORTUNITY}.<dim-apiName>`, rowGrouping: true },
-                { model: `${OBJ_ACCOUNT}.<dim-apiName>`,     rowGrouping: true },
-                { model: '<calc-measure-apiName>_clc',       rowGrouping: false }
-            ];
-            this._subscribeEvents();
-            this._setLoadingState();
-            this.sdk.registerFieldsForQuery(specs, SOURCE_NAME, { limit: QUERY_LIMIT });
+            const query = compileQuery(ROLE_DEFINITIONS);
+            this._orderedRoles = query.orderedRoles;
+            this._indexByRole = query.indexByRole;
+            this._subscribeEvents(generation);
+            this._setLoadingState(generation);
             this._isQueryRegistered = true;
-        } catch (err) {
-            this._hasError = true; this._errorMessage = String(err?.message || err); this._isLoading = false;
-            this.sdk.actions?.notifyLifecycleChange?.(LIFE_CYCLE.ERROR, { message: this._errorMessage });
+            this.sdk.registerFieldsForQuery(query.specs, SOURCE_NAME, {
+                limit: QUERY_LIMIT
+            });
+        } catch (error) {
+            if (!this._isCurrentPipeline(generation)) return;
+            this._showError(String(error?.message || error));
         }
     }
-    _subscribeEvents() {
+
+    _subscribeEvents(generation) {
         if (typeof this.sdk.on !== 'function') return;
-        this._unsubscribes.push(
-            this.sdk.on(SDK_EVENTS.DATA_UPDATE, (rows) => this._handleDataUpdate(rows)),
-            this.sdk.on(SDK_EVENTS.FILTER_CHANGE,    () => this._isQueryRegistered && this._setLoadingState()),
-            this.sdk.on(SDK_EVENTS.PARAMETER_CHANGE, () => this._isQueryRegistered && this._setLoadingState())
-        );
+        this._unsubscribes = [
+            this.sdk.on(SDK_EVENTS.DATA_UPDATE, (rows) => {
+                if (this._isCurrentPipeline(generation)) this._processRows(rows);
+            }),
+            this.sdk.on(SDK_EVENTS.FILTER_CHANGE, (payload) => {
+                if (
+                    this._isCurrentPipeline(generation)
+                    && this._isQueryRegistered
+                    && this._isFilterRelevant(payload)
+                ) {
+                    this._setLoadingState(generation, { preserveRows: true });
+                }
+            }),
+            this.sdk.on(SDK_EVENTS.PARAMETER_CHANGE, () => {
+                if (this._isCurrentPipeline(generation) && this._isQueryRegistered) {
+                    this._setLoadingState(generation, { preserveRows: true });
+                }
+            })
+        ];
     }
-    _handleDataUpdate(raw) {
-        if (this._loadingTimer) clearTimeout(this._loadingTimer);
-        const rows = raw == null ? [] : raw;
-        const len = typeof rows.length === 'number' ? rows.length : 0;
+
+    _isCurrentPipeline(generation) {
+        return this._connected && generation === this._pipelineGeneration;
+    }
+
+    _processRows(rawRows) {
+        clearTimeout(this._loadingTimer);
+        if (rawRows === undefined) {
+            this._isQueryRegistered = false;
+            this._showError('Unable to load data. Please retry.');
+            return;
+        }
+        const length = typeof rawRows?.length === 'number' ? rawRows.length : 0;
         const mapped = [];
-        for (let i = 0; i < len; i++) {
-            const r = rows[i]; if (!r) continue;
+        for (let rowIndex = 0; rowIndex < length; rowIndex += 1) {
+            const rawRow = rawRows[rowIndex];
+            if (!rawRow) continue;
+            const values = {};
+            for (const role of this._orderedRoles) {
+                values[role.key] = rawRow[this._indexByRole[role.key]] ?? null;
+            }
             mapped.push({
-                rowKey: `row-${i}-${r[IDX.OPPORTUNITY_ID] || ''}`,
-                opportunityId: r[IDX.OPPORTUNITY_ID] ?? null,
-                accountName:   r[IDX.ACCOUNT_NAME]   ?? null,
-                amount:        Number(r[IDX.AMOUNT]) || 0
+                rowKey: this._buildStableRowKey(values, rowIndex),
+                values,
+                displayValues: this._formatRoleValues(values)
             });
         }
-        this.rows = mapped.sort((a, b) => (b.amount || 0) - (a.amount || 0));
-        this._isLoading = false; this._hasError = false;
-        this.sdk.actions?.notifyLifecycleChange?.(this.rows.length ? LIFE_CYCLE.LOADED : LIFE_CYCLE.NO_DATA);
+        this.rows = this._sortReturnedRows(mapped);
+        this._isLoading = false;
+        this._hasError = false;
+        this._hasNoData = this.rows.length === 0;
+        this.sdk.actions?.notifyLifecycleChange?.(
+            this._hasNoData ? LIFE_CYCLE.NO_DATA : LIFE_CYCLE.LOADED
+        );
     }
-    _setLoadingState() {
+
+    _setLoadingState(generation, { preserveRows = false } = {}) {
+        if (!this._isCurrentPipeline(generation)) return;
+        if (!preserveRows) this.rows = [];
         this._isLoading = true;
-        if (this._loadingTimer) clearTimeout(this._loadingTimer);
-        this._loadingTimer = setTimeout(() => { if (this._isLoading) this._isLoading = false; }, LOADING_SAFETY_MS);
+        this._hasError = false;
+        this._hasNoData = false;
+        clearTimeout(this._loadingTimer);
+        this._loadingTimer = setTimeout(() => {
+            if (!this._isCurrentPipeline(generation) || !this._isLoading) return;
+            this._showError('Data refresh timed out. Please retry.');
+        }, LOADING_SAFETY_MS);
     }
-    get hasRows() { return this.rows.length > 0; }
+
+    _showError(message) {
+        clearTimeout(this._loadingTimer);
+        this._isLoading = false;
+        this._hasNoData = false;
+        this._hasError = true;
+        this._errorMessage = message;
+        this.sdk.actions?.notifyLifecycleChange?.(LIFE_CYCLE.ERROR, { message });
+    }
+
+    _isFilterRelevant(payload) {
+        const activeModels = new Set(ROLE_DEFINITIONS.map((role) => role.model));
+        const payloadModels = this._collectFilterModels(payload);
+        return payloadModels.length === 0
+            || payloadModels.some((model) => activeModels.has(model));
+    }
+
+    _collectFilterModels(payload) {
+        const models = [];
+        for (const filter of payload?.filters || []) {
+            for (const field of filter?.fields || []) {
+                if (typeof field?.model === 'string') models.push(field.model);
+            }
+        }
+        return models;
+    }
+
+    _buildStableRowKey(values, rowIndex) {
+        const identity = IDENTITY_ROLE_KEY
+            ? values[IDENTITY_ROLE_KEY]
+            : COMPOSITE_IDENTITY_ROLE_KEYS.map((key) => values[key]).join('|');
+        return `row-${rowIndex}-${String(identity ?? '')}`;
+    }
+
+    _formatRoleValues(values) {
+        return Object.fromEntries(
+            ROLE_DEFINITIONS.map((role) => [
+                role.key,
+                this._formatRoleValue(role, values[role.key])
+            ])
+        );
+    }
+
+    _sortReturnedRows(rows) {
+        if (!SORT_ROLE_KEY) return rows;
+        const direction = SORT_DIRECTION === 'asc' ? 1 : -1;
+        return rows.sort((left, right) =>
+            direction * this._compareRoleValues(
+                left.values[SORT_ROLE_KEY],
+                right.values[SORT_ROLE_KEY]
+            )
+        );
+    }
 }
 ```
 
-## See also
+Generate `IDENTITY_ROLE_KEY`, `COMPOSITE_IDENTITY_ROLE_KEYS`, `SORT_ROLE_KEY`,
+`SORT_DIRECTION`, `_formatRoleValue`, and `_compareRoleValues` from the
+confirmed contract and active query roles. A
+timeout must show a user-safe error and emit `error`; it must not silently hide
+the spinner. Sort only when the contract identifies a sort role, and describe
+the result as sorted within the returned limit.
 
-- SKILL.md gates: **#2** (discovery-first), **#7** (register vs fetch),
-  **#8** (spec order), **#9** (`OBJ_` naming).
-- `references/smoke-test-query.md` — validate the SDM query with `curl`
-  before writing the LWC.
-- `references/apex-insight-panel.md` — Build 2 layers a per-row panel
-  onto this pattern.
-- `references/sdm-data-binding.md` - default role-based metadata and runtime
-  rebinding pattern.
+## Verification
+
+Before generation, run `references/smoke-test-query.md` against the handoff.
+After generation, verify:
+
+1. `ROLE_DEFINITIONS`, `specs`, and `indexByRole` have identical role counts.
+2. Every dimension precedes every measure.
+3. Every qualified raw measure has a confirmed aggregation.
+4. Every bare calculated measure omits aggregation.
+5. The identity or composite produces stable non-empty row keys.
+6. The visible field order and labels match the prompt.
+7. Dashboard filters update rows without explicit `fetchData()`.

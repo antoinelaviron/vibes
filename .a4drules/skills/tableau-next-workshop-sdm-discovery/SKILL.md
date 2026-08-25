@@ -73,7 +73,8 @@ substitute for that call.
                print(f'  dim  : {d[\"apiName\"]:<40} ({d.get(\"dataType\",\"?\")})  {d.get(\"label\",\"\")}')
        for m in obj.get('semanticMeasurements', []):
            if m.get('isVisible', True):
-               print(f'  meas : {m[\"apiName\"]:<40} ({m.get(\"dataType\",\"?\")})  {m.get(\"label\",\"\")}')
+               agg = m.get('aggregationType') or m.get('aggregation') or ''
+               print(f'  meas : {m[\"apiName\"]:<40} ({m.get(\"dataType\",\"?\")}, agg: {agg or \"?\"})  {m.get(\"label\",\"\")}')
    print('\n=== Model-level calc measures (bare apiName, no table_name) ===')
    for c in sdm.get('semanticCalculatedMeasurements', []):
        if c.get('isVisible', True):
@@ -179,25 +180,49 @@ it wrong.**
 ```json
 {
   "sourceName": "<apiName from `sf api request rest /services/data/v67.0/ssot/semantic/models` — do NOT copy from this file>",
-  "fields": [
-    { "key": "<local key>", "kind": "dimension", "apiName": "<from /tmp/sdm.json>", "tableName": "<object apiName>", "label": "<label>" },
-    { "key": "<local key>", "kind": "calculatedMeasurement", "apiName": "<from /tmp/sdm.json>", "label": "<label>" }
+  "roles": [
+    {
+      "key": "<role key from the confirmed prompt contract>",
+      "kind": "dimension",
+      "model": "<Object.field or bare calculated dimension>",
+      "label": "<label from /tmp/sdm.json>",
+      "visible": true,
+      "valueKind": "<confirmed display kind>",
+      "behaviors": ["<inherited role behaviors>"]
+    },
+    {
+      "key": "<measure role key>",
+      "kind": "measure",
+      "model": "<Object.field or bare calculated measurement>",
+      "aggregationType": "<verified aggregation; omit for bare calculated fields>",
+      "label": "<label from /tmp/sdm.json>",
+      "visible": true,
+      "valueKind": "number",
+      "behaviors": ["<inherited role behaviors>"]
+    }
   ],
-  "limit": 25
+  "displayOrder": ["<visible role keys in prompt order>"],
+  "identityRoleKey": "<stable identity role, or null for a confirmed composite>",
+  "compositeIdentityRoleKeys": ["<ordered role keys when identityRoleKey is null>"],
+  "actionTargetRoleKey": null,
+  "limit": "<limit from the confirmed prompt contract>"
 }
 ```
 
 Rules for populating the JSON:
 
 - `sourceName` = the SDM's `apiName` field from the list-SDMs response.
-- Object-scoped dimension/raw measure → `apiName` + `tableName` (both from
-  `/tmp/sdm.json`'s `semanticDataObjects[]`). Include `label`. For a raw
+- Copy `key`, `visible`, `valueKind`, `behaviors`, `displayOrder`, identity,
+  action target, identity/composite keys, and limit from the already confirmed
+  prompt contract. Do not reinterpret business roles during discovery.
+- Object-scoped dimension/raw measure -> `model: "Object.field"`, with both
+  segments verified under the same `semanticDataObjects[]` entry. For a raw
   measure, also include its verified `aggregationType`.
-- Model-level calc measure (`*_clc`) → `apiName` only,
-  `kind: "calculatedMeasurement"`, `tableName` omitted.
-- Model-level metric (`*_mtc`) → `apiName` only, `kind: "metric"`,
-  `tableName` omitted. Prefer the underlying `_clc` — `_mtc` often fails
-  to resolve from LWC extensions.
+- Model-level calculated dimension or measurement -> bare `model`; omit
+  `aggregationType` for a calculated measurement.
+- Model-level metric -> bare `model`. Prefer the underlying calculated
+  measurement when available because metrics often fail to resolve from LWC
+  extensions.
 
 **Field metadata rule** (HAR-verified against `tmp-df26-workshop`,
 2026-07-10):
@@ -214,10 +239,11 @@ Do not add `aggregationType` to model-level calculated fields or metrics. Raw
 object-scoped measures do require the verified aggregation for
 `registerFieldsForQuery`.
 
-**Wire-format reminder:** `expression` internals are snake_case
-(`table_field`, `table_name`, `semantic_field`); query-level keys are
-camelCase (`rowGrouping`, `limitOptions`). See the workshop LWC skill's
-Build 1 section for the full canonical query shape.
+**Wire-format reminder:** registered-query specs use camelCase keys such as
+`rowGrouping`; gateway payloads use proto-style snake_case keys such as
+`table_field`, `table_name`, `semantic_field`, and `limit_options`. See
+`../tableau-semantic-query-api/references/spec-to-query.md` for the exact
+registered-spec to gateway-field translation.
 
 ## Presenting the mapping (Step 7 detail)
 
@@ -241,13 +267,17 @@ to Total_Sales_mtc", update, re-verify against `/tmp/sdm.json`, re-present.
 
 In native mode, Builds 1, 2, and 3 preserve inherited property names and types.
 In hard-coded recovery mode, Build 2 preserves Build 1's confirmed query
-contract. Build 3 preserves it and adds the confirmed hidden Account ID
-dimension.
+contract. Build 3 preserves it and adds a hidden ID dimension only when the
+prompt-derived Salesforce action needs a target record role that the inherited
+contract does not already provide.
 
-Build 3 also uses a hidden `accountId` for the Log a Call URL. Its new native
-bundle adds a required `accountIdField: SemanticDimension` role. Hard-coded
-recovery mode must discover and confirm the ID-carrying field; do not assume
-its API name.
+Accept the role contract from `tableau-next-workshop-lwc` and discover each
+role by its business purpose. For an added action target, confirm the object,
+the ID-carrying field, and any expected Salesforce ID prefix. Verify that the
+ID is functionally dependent on the existing row grain before adding it; a new
+grouping dimension must not split Build 2's rows. Do not default to Account,
+`accountIdField`, prefix `001`, or `Global.LogACall` unless the attendee asks
+for the canonical Account Log a Call scenario.
 
 ## Files in this skill
 

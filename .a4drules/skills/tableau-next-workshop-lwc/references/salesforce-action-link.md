@@ -1,127 +1,212 @@
-# salesforce-action-link — per-row Salesforce quick action (Build 3 pattern)
+# Prompt-derived Salesforce record action
 
-**What this teaches:** how to open a Salesforce standard quick action
-(Log a Call, New Task, etc.) on a record from a Tableau Next dashboard
-extension. The tricky part is that the extension runs inside
-`*--analytics.<domain>` and standard navigation from that origin fails
-silently — this pattern rewrites the origin and opens the action in a
-new tab.
+Use this Build 3 pattern to open a confirmed Salesforce record page or quick
+action from a Tableau Next extension. Standard Lightning navigation silently
+fails inside `*--analytics.<domain>`, so validate and rewrite the origin before
+opening a new tab.
 
-**Do NOT copy this file verbatim.** The quick-action name must match the org's
-configuration. In the default path, the ID-carrying field comes from the
-required `accountIdField: SemanticDimension` binding. Only hard-coded recovery
-mode obtains it from discovery.
+## Contents
 
-## Rules
+- [Derive the action contract](#derive-the-action-contract)
+- [Target record role](#target-record-role)
+- [Validation and URL construction](#validation-and-url-construction)
+- [Row and click handling](#row-and-click-handling)
+- [Template](#template)
+- [Verification](#verification)
 
-- **Origin rewrite is mandatory.** `NavigationMixin` does not work
-  inside `*--analytics.<domain>`. Rewrite to `.lightning.force.com`
-  before `window.open`. See SKILL.md Gate #6.
-- **Use `window.open(url, '_blank')`,** not `NavigationMixin.Navigate`,
-  and not a same-tab redirect (the analytics iframe traps the nav).
-- **Exact quick-action name.** `Global.LogACall` — one word, no
-  underscores, `Global.` prefix. Do NOT invent `Account.LogACall` or
-  `Global.Log_a_Call`. Confirm the name in Setup → Global Actions if
-  it's not the workshop default.
-- **The ID-carrying field is a DIMENSION** (`rowGrouping: true`), and
-  it must be declared **before** any measure spec. Appending it at
-  the end of `specs[]` after a `_clc` measure produces the classic
-  Gate #8 desync — the row Proxy delivers the measure where the ID
-  should be, and the URL becomes `recordId=<dollar amount>`. See
-  SKILL.md Gate #8.
-- **Hidden column.** The ID is used for the URL, NOT rendered as a
-   visible `<td>`. Store as `row.accountId`; do not add a header cell.
-- **Validate before opening.** Render the action disabled or omit it when the
-  role is unmapped. Accept only a 15- or 18-character Account ID beginning
-  with `001`; this catches an amount accidentally mapped into `recordId`.
-- **Use `<lightning-button-icon>`,** not `<lightning-button>` — the
-  label wraps in narrow columns and looks bad. Set
-  `alternative-text` and `title`, and pass the ID via
-  `data-account-id={row.accountId}`.
-- **Underneath**, the panel-swap from `references/apex-insight-panel.md`
-  is unchanged — this pattern *adds* a button, doesn't replace one.
+## Derive the action contract
 
-## Annotated snippet — the handler
+Confirm the action before generating code. Record-page navigation also needs
+the target object's API name; the ID alone is not a complete Lightning route:
 
 ```javascript
-handleLogACallClick(event) {
-    const accountId = event.currentTarget.dataset.accountId;
-    if (!/^001[a-zA-Z0-9]{12}(?:[a-zA-Z0-9]{3})?$/.test(accountId || '')) return;
+const ACTION_CONTRACT = {
+    kind: 'recordPage',
+    label: 'Open Case',
+    iconName: 'utility:new_window',
+    targetRoleKey: 'caseId',
+    targetObjectApiName: 'Case',
+    expectedIdPrefixes: ['500']
+};
+```
 
-    // Rewrite origin: *--analytics.<domain>  →  <base>.lightning.force.com
-    const base = window.location.origin.replace(/--analytics\..+/, '.lightning.force.com');
-    if (!base.endsWith('.lightning.force.com')) return;
-    const url  = `${base}/lightning/action/quick/Global.LogACall?recordId=${encodeURIComponent(accountId)}`;
+For a quick action:
 
-    // window.open, NOT NavigationMixin — the analytics iframe blocks the mixin silently.
+```javascript
+const ACTION_CONTRACT = {
+    kind: 'quickAction',
+    label: 'Log a Call',
+    iconName: 'utility:log_a_call',
+    actionName: 'Global.LogACall',
+    targetRoleKey: 'accountId',
+    expectedIdPrefixes: ['001']
+};
+```
+
+The second descriptor is the canonical Account Log a Call example only. Do not
+default to it. Confirm a quick-action API name from the prompt or org; never
+invent one.
+
+## Target record role
+
+Reuse an inherited role when it identifies the exact target record. Otherwise
+add a hidden prompt-derived `SemanticDimension` property to the new
+`vibeAction` bundle.
+
+Before adding a role, verify that its value is functionally dependent on the
+existing row grain. A new grouping dimension can split aggregate rows; if it
+does, clarify or choose a record-page design that matches the existing grain.
+
+Insert every new hidden dimension before all measures:
+
+```javascript
+const orderedRoles = [
+    ...inheritedDimensionRoles,
+    actionTargetRole,
+    ...inheritedMeasureRoles
+];
+const indexByRole = Object.fromEntries(
+    orderedRoles.map((role, index) => [role.key, index])
+);
+```
+
+Store the target in `row.values[ACTION_CONTRACT.targetRoleKey]`. Do not render
+the hidden ID as a visible table cell.
+
+## Validation and URL construction
+
+```javascript
+function isValidSalesforceId(value, expectedPrefixes = []) {
+    if (typeof value !== 'string') return false;
+    if (!/^[a-zA-Z0-9]{15}(?:[a-zA-Z0-9]{3})?$/.test(value || '')) return false;
+    return (
+        expectedPrefixes.length === 0
+        || expectedPrefixes.some((prefix) => value.startsWith(prefix))
+    );
+}
+
+function lightningOrigin(origin) {
+    const rewritten = origin.replace(/--analytics(?=\.)/, '');
+    try {
+        const parsed = new URL(rewritten);
+        return parsed.protocol === 'https:' && parsed.hostname.endsWith('.lightning.force.com')
+            ? parsed.origin
+            : null;
+    } catch (error) {
+        return null;
+    }
+}
+
+function actionUrl(contract, origin, recordId) {
+    const base = origin?.endsWith('.lightning.force.com')
+        ? origin
+        : lightningOrigin(origin);
+    if (!base) return null;
+    const encodedRecordId = encodeURIComponent(recordId);
+    if (contract.kind === 'recordPage' && contract.targetObjectApiName) {
+        const objectApiName = encodeURIComponent(contract.targetObjectApiName);
+        return `${base}/lightning/r/${objectApiName}/${encodedRecordId}/view`;
+    }
+    if (contract.kind === 'quickAction' && contract.actionName) {
+        const actionName = encodeURIComponent(contract.actionName);
+        return `${base}/lightning/action/quick/${actionName}?recordId=${encodedRecordId}`;
+    }
+    return null;
+}
+```
+
+Expected ID prefixes are optional and valid only when the target object's
+prefix is confirmed. General ID shape validation remains mandatory.
+
+## Row and click handling
+
+Generate availability and accessible text while mapping rows:
+
+```javascript
+const recordId = values[ACTION_CONTRACT.targetRoleKey];
+const subject = values[PRIMARY_LABEL_ROLE];
+const actionAvailable = isValidSalesforceId(
+    recordId,
+    ACTION_CONTRACT.expectedIdPrefixes
+) && Boolean(this._lightningOrigin);
+
+mapped.push({
+    rowKey,
+    values,
+    displayValues,
+    actionRecordId: recordId,
+    actionAvailable,
+    actionDisabled: !actionAvailable,
+    actionAccessibleLabel: `${ACTION_CONTRACT.label} for ${subject} - opens in a new tab`
+});
+```
+
+```javascript
+handleActionClick(event) {
+    const recordId = event.currentTarget.dataset.recordId;
+    if (!isValidSalesforceId(recordId, ACTION_CONTRACT.expectedIdPrefixes)) return;
+
+    const url = actionUrl(ACTION_CONTRACT, this._lightningOrigin, recordId);
+    if (!url) {
+        this._showActionError('Unable to open this Salesforce destination.');
+        return;
+    }
     window.open(url, '_blank', 'noopener');
 }
 ```
 
-## Spec order — insert the ID dimension BEFORE the measure
+Use `window.open`, not `NavigationMixin`, and do not redirect the iframe's
+current tab. Set `this._lightningOrigin = lightningOrigin(window.location.origin)`
+once during component setup so an invalid destination disables actions before
+interaction. Do not infer popup failure from the `window.open` return value;
+`noopener` may return `null` after a successful open.
 
-The ID-carrying spec is a **dimension** and must sit alongside the
-other dimensions, not appended at the end:
-
-```javascript
-const specs = [
-    // ...Build 2 dimensions (rowGrouping: true)...
-    { model: `${OBJ_OPPORTUNITY}.<id-carrying-dim-apiName>`, rowGrouping: true },  // NEW: hidden ID
-    // ...Build 2 measures (rowGrouping: false)...
-    { model: '<calc-measure-apiName>_clc', rowGrouping: false }
-];
-
-// Update IDX so ACCOUNT_ID lands at its correct position — right BEFORE the last-position measure.
-const IDX = {
-    /* ...existing dims... */
-    ACCOUNT_ID: <n-1>,
-    AMOUNT:     <n>          // measure — always last
-};
-```
-
-In native mode, use the required bound role instead of an `OBJ_` placeholder:
-
-```javascript
-if (this.accountIdField?.name) {
-    dimensionSpecs.push({ model: this.accountIdField.name, rowGrouping: true });
-}
-```
-
-Symptom you'll see if you get this wrong: the Log a Call button opens
-`…?recordId=4822.56` (a dollar amount) instead of `…?recordId=001…`
-(a real 15/18-char record ID). Fix by moving the ID spec before every
-measure in the array, and rebuilding `IDX` to match.
-
-## Template — hidden ID, visible button
+## Template
 
 ```html
-<td class="slds-text-align_center">
-  <lightning-button-icon
-    icon-name="utility:log_a_call"
-    variant="border"
-    alternative-text="Log a Call"
-    title="Log a Call on this account"
-    data-account-id={row.accountId}
-    onclick={handleLogACallClick}
-  ></lightning-button-icon>
-</td>
+<thead>
+  <tr>
+    <!-- inherited headers... -->
+    <th scope="col">{actionColumnLabel}</th>
+  </tr>
+</thead>
+<tbody>
+  <!-- Per row, after the inherited data cells: -->
+  <tr>
+    <td class="slds-text-align_center">
+      <lightning-button-icon
+        icon-name={actionIconName}
+        variant="border"
+        alternative-text={row.actionAccessibleLabel}
+        title={row.actionAccessibleLabel}
+        data-record-id={row.actionRecordId}
+        onclick={handleActionClick}
+        disabled={row.actionDisabled}
+      ></lightning-button-icon>
+    </td>
+  </tr>
+</tbody>
+<template lwc:if={actionError}>
+  <p class="slds-text-color_error" role="alert">{actionError}</p>
+</template>
 ```
 
-The row-mapping side stashes `accountId` off the ID dimension:
+LWC templates do not support negation expressions, so generate
+`actionDisabled: !actionAvailable` in the row model. Disabling or omitting an
+invalid action is better than presenting an enabled control that silently does
+nothing. Derive `actionColumnLabel` from the visible action label. Validate the
+Lightning destination during component setup so a known-invalid origin also
+disables every row action; preserve the in-widget alert for click-time failures.
 
-```javascript
-mapped.push({
-    /* ...existing row fields... */
-    accountId: r[IDX.ACCOUNT_ID],   // hidden — never rendered as a column
-    amount:    Number(r[IDX.AMOUNT]) || 0
-});
-```
+## Verification
 
-## See also
-
-- SKILL.md gates: **#6** (origin rewrite), **#8** (spec order — ID
-  dimension goes before measures), **#3** (SLDS-first styling).
-- `references/apex-insight-panel.md` — the panel-swap this pattern
-  layers onto.
-- `references/sdm-data-binding.md` - native role metadata and rebinding.
-- `references/sdm-table.md` - hard-coded recovery pipeline.
+1. Valid 15- and 18-character target IDs open the requested destination.
+2. Missing, numeric, malformed, and wrong-prefix IDs remain unavailable.
+3. Prefix validation is omitted when the target object's prefix is unknown.
+4. The rewritten origin is HTTPS and ends in `.lightning.force.com`.
+5. The confirmed action API name and record ID are URL encoded.
+6. Any added hidden ID role appears before every measure.
+7. Build 3 has the same row count and grain as Build 2.
+8. The accessible name includes the visible action, row subject, and new-tab
+   behavior.
+9. The inherited insight panel and all Build 2 bindings remain unchanged.

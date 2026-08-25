@@ -1,143 +1,123 @@
-# d3-funnel — pipeline funnel by opportunity stage
+# D3 funnel: ordered process steps
 
-**Attribution:** shape adapted from an internal reference `funnelChart`
-implementation. That version already uses `loadScript` — the LWC-native pattern is intact here.
-The change is wiring it to the workshop's Sales Cloud SDM instead of
-an `@api` data prop.
+Use a funnel when the prompt names an ordered process and a value for each
+step. Funnel order is business meaning; never derive it alphabetically or from
+returned value size.
 
-**What this teaches:** how to render a sales funnel — trapezoids
-stacked top-to-bottom, each stage's width proportional to the number
-of opportunities in it. Sales-native chart type that isn't a native
-Tableau Next viz; makes an obvious "look how many prospects fall out
-between Discovery and Proposal" story.
+## Contents
 
-**Sales Cloud SDM fit:** rollup grouped by `Opportunity_Stage`, count
-via `Number_of_Opportunities_clc`. Both exist in the workshop
-template SDM. Attendee prompt shape: *"funnel chart showing how many
-opportunities are in each stage."*
+- [Semantic roles](#semantic-roles)
+- [Layout rules](#layout-rules)
+- [Core geometry](#core-geometry)
+- [Query shape](#query-shape)
+- [Verification](#verification)
+- [DF26 worked example](#df26-worked-example)
 
-**Do NOT copy this file verbatim.** Native mode exposes a model, stage
-dimension, and count measure. Use bound labels for visible and accessible
-text. Only hard-coded recovery mode uses discovery.
+## Semantic roles
 
-## Rules
+| Property | Type | Purpose |
+|---|---|---|
+| `stepField` | `SemanticDimension` | Ordered process step |
+| `valueField` | `SemanticMeasure` | Width and displayed value |
 
-- **Every rule from `references/d3-in-lwc.md` applies** —
-  `lwc:dom="manual"` on the chart container, `_pendingRows` buffer,
-  D3 via `loadScript` from the `d3` static resource, ResizeObserver
-  from the render function.
-- **`registerFieldsForQuery`** — one dimension (`Opportunity_Stage`,
-  `rowGrouping: true`), one calc measure (`Number_of_Opportunities_clc`,
-  `rowGrouping: false`, NO `aggregationType`). Two specs total.
-- **Sort by canonical stage order,** not by count. The SDM returns
-  stages alphabetically; a "funnel" whose rows are in random order
-  reads as noise. Keep a `STAGE_ORDER` const in the LWC:
-  `['Prospecting', 'Qualification', 'Needs Analysis',
-    'Value Proposition', 'Proposal', 'Negotiation', 'Closed Won',
-    'Closed Lost']` and sort by index. Unknown stages go last.
-- **Trapezoid, not rectangle.** Each row's width tapers to the next
-  row's width — the visual "funneling" effect. Shape formula:
-  `topWidth = maxWidth * (1 - i/N * 0.7)`,
-  `bottomWidth = maxWidth * (1 - (i+1)/N * 0.7)`. Adjust the `0.7`
-  taper factor to taste.
-- **Two labels per step** — stage name centered, count on the line
-  below at ~13px. Both need `pointer-events: none` so the click
-  handler on the trapezoid still fires.
-- **Optional: hide Closed Lost from the funnel.** It's not a step in
-  the funnel; it's the sideways exit. Filter it out of the rendered
-  data before `.forEach`, or render it separately with a distinct
-  color if you want to show it.
-
-## Annotated snippet — the trapezoid stack
+Map rows to `{ step, value }`. Require an explicit ordered list or a confirmed
+ordering function in the prompt-derived contract:
 
 ```javascript
-_renderChart() {
-    const container = this.template.querySelector('.chart-container');
-    const { width, height } = container.getBoundingClientRect();
-    const margin = { top: 40, right: 20, bottom: 20, left: 20 };
-    const chartW = width - margin.left - margin.right;
-    const chartH = height - margin.top - margin.bottom;
-
-    // Sort by canonical stage order — see STAGE_ORDER const.
-    const rows = [...this.rows].sort(
-        (a, b) => (STAGE_ORDER.indexOf(a.stage) - STAGE_ORDER.indexOf(b.stage))
-    );
-
-    const stepH   = chartH / rows.length;
-    const maxW    = chartW;
-    const minW    = chartW * 0.3;
-    const color   = d3.scaleLinear()
-        .domain([0, rows.length - 1])
-        .range(['#1B96FF', '#032D60']);
-
-    const svg = d3.select(container).append('svg')
-        .attr('width', width).attr('height', height);
-    const g = svg.append('g')
-        .attr('transform', `translate(${margin.left},${margin.top})`);
-
-    rows.forEach((row, i) => {
-        const y = i * stepH;
-        const topRatio    = 1 - (i     / rows.length) * 0.7;
-        const bottomRatio = 1 - ((i+1) / rows.length) * 0.7;
-        const topW    = minW + (maxW - minW) * topRatio;
-        const bottomW = minW + (maxW - minW) * bottomRatio;
-        const topX    = (chartW - topW) / 2;
-        const botX    = (chartW - bottomW) / 2;
-
-        const trap = [
-            [topX,             y            ],
-            [topX + topW,      y            ],
-            [botX + bottomW,   y + stepH    ],
-            [botX,             y + stepH    ]
-        ];
-
-        g.append('path')
-            .attr('d', d3.line()(trap) + 'Z')
-            .attr('fill', color(i))
-            .attr('stroke', '#fff').attr('stroke-width', 2);
-
-        g.append('text')
-            .attr('x', chartW / 2).attr('y', y + stepH / 2 - 4)
-            .attr('text-anchor', 'middle').attr('fill', '#fff')
-            .attr('font-size', 16).attr('font-weight', 500)
-            .attr('pointer-events', 'none')
-            .text(row.stage);
-
-        g.append('text')
-            .attr('x', chartW / 2).attr('y', y + stepH / 2 + 14)
-            .attr('text-anchor', 'middle').attr('fill', '#fff')
-            .attr('font-size', 13).attr('opacity', 0.9)
-            .attr('pointer-events', 'none')
-            .text(row.oppCount);
-    });
-}
+// Example only. Replace every value with the confirmed prompt order.
+const STEP_ORDER = ['<first-step>', '<second-step>', '<third-step>'];
 ```
 
-## Wiring into the pipeline
+Unknown values sort after known steps while retaining deterministic order:
+
+```javascript
+function stepIndex(step) {
+    const index = STEP_ORDER.indexOf(step);
+    return index === -1 ? Number.MAX_SAFE_INTEGER : index;
+}
+
+const rows = [...this.rows].sort(
+    (left, right) => stepIndex(left.step) - stepIndex(right.step)
+        || String(left.step).localeCompare(String(right.step))
+);
+```
+
+Do not exclude a terminal category unless the prompt requests it.
+
+## Layout rules
+
+- Apply every rule in `d3-in-lwc.md`.
+- Query the step dimension before the value measure.
+- Draw trapezoids whose bottom width approaches the next step's width.
+- Display the bound step value and formatted measure value inside each shape.
+- Include an SVG title/description and a textual ordered summary so shape and
+  color are not the only representations.
+- Do not attach click behavior unless the prompt requests filtering or
+  selection. If requested, use focusable native controls over or alongside the
+  shapes, with keyboard activation and visible focus.
+
+## Core geometry
+
+```javascript
+const widthScale = d3.scaleLinear()
+    .domain([0, d3.max(rows, (row) => row.value) || 1])
+    .range([0, maxWidth]);
+
+rows.forEach((row, index) => {
+    const y = index * stepHeight;
+    const nextRow = rows[index + 1] || row;
+    const topWidth = widthScale(row.value);
+    const bottomWidth = widthScale(nextRow.value);
+    const topX = (chartWidth - topWidth) / 2;
+    const bottomX = (chartWidth - bottomWidth) / 2;
+    const polygon = [
+        [topX, y],
+        [topX + topWidth, y],
+        [bottomX + bottomWidth, y + stepHeight],
+        [bottomX, y + stepHeight]
+    ];
+
+    const centerX = chartWidth / 2;
+    const centerY = y + stepHeight / 2;
+    group.append('path').attr('d', `${d3.line()(polygon)}Z`);
+    group.append('text')
+        .attr('x', centerX)
+        .attr('y', centerY - 4)
+        .attr('text-anchor', 'middle')
+        .text(row.step)
+        .attr('pointer-events', 'none');
+    group.append('text')
+        .attr('x', centerX)
+        .attr('y', centerY + 14)
+        .attr('text-anchor', 'middle')
+        .text(this._formatValue(row.value))
+        .attr('pointer-events', 'none');
+});
+```
+
+Choose foreground text per fill so normal-size labels retain at least 4.5:1
+contrast. Values must be finite and nonnegative before scaling.
+
+## Query shape
 
 ```javascript
 const specs = [
-    { model: this.stageField.name, rowGrouping: true },
-    measureSpecFromBinding(this.opportunityCountField)
+    { model: this.stepField.name, rowGrouping: true },
+    measureSpecFromBinding(this.valueField)
 ];
-// Row shape: [stage, oppCount].
+// Row contract: [step, value].
 ```
 
-Row mapping in `_handleDataUpdate`:
-`{ stage: r[IDX.STAGE], oppCount: Number(r[IDX.COUNT]) || 0 }`.
+## Verification
 
-## Common surprises
+- Known steps follow the confirmed order.
+- Unknown steps appear last, not first.
+- Prompt-specific exclusions are explicit.
+- Value formatting and visible/accessibility labels use the binding contract.
+- Any filtering interaction has a keyboard-equivalent control.
 
-- **Trapezoids are horizontal rectangles.** Missing the taper —
-  `topWidth` and `bottomWidth` returning the same value. Verify
-  `bottomRatio` decreases with `i`.
-- **Stages appear in the wrong order.** SDM returned alphabetical.
-  Sort by `STAGE_ORDER` index before rendering.
-- **Text labels don't respond to hover.** Missing
-  `pointer-events: none` — text is intercepting mouse events.
+## DF26 worked example
 
-## See also
-
-- SKILL.md gates: **#7** (registerFieldsForQuery), **#8** (spec order).
-- `references/d3-in-lwc.md` — every rule there applies.
-- `references/sdm-data-binding.md` - default pipeline; `sdm-table.md` is recovery only.
+For an opportunity pipeline funnel, map step to stage and value to opportunity
+count, and confirm the exact sales-stage order. `Closed Lost` is excluded or
+separated only if the attendee requests that presentation.

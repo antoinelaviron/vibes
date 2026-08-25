@@ -1,156 +1,97 @@
-# d3-bump — rank-over-time by account (who moved up, who slipped)
+# D3 bump chart: rank over time
 
-**Attribution:** shape adapted from an internal reference `bumpChart`
-implementation. That version is production-scale (~900 lines, full date
-parsing, palettes, top-N filtering) — this reference keeps the D3 layout mechanic and simplifies
-everything else for workshop scope. Loads D3 the LWC-native way (per
-`references/d3-in-lwc.md`) and reads from the Sales Cloud SDM.
+Use a bump chart when the prompt asks how entities move up or down in rank over
+ordered periods. Y encodes rank, not the raw measure.
 
-**What this teaches:** how to render a bump chart — one polyline per
-entity across time buckets, where Y is *rank* (1 = top) rather than
-value. Lines that dip and cross tell the "who overtook whom" story
-that a stacked-bar or line chart can't. Not a stock Tableau Next viz.
+## Semantic roles
 
-**Sales Cloud SDM fit:** rows grouped by `Close_Date` (quarter or
-month) × `Account_Name`, ranked by `Total_Amount_clc`. All three
-exist in the workshop template SDM. Attendee prompt shape: *"bump
-chart showing how our top 10 accounts have ranked each quarter."*
+| Property | Type | Purpose |
+|---|---|---|
+| `periodField` | `SemanticDimension` | Time or ordered period |
+| `entityField` | `SemanticDimension` | Ranked series |
+| `rankingValueField` | `SemanticMeasure` | Value used to rank each period |
 
-**Do NOT copy this file verbatim.** Native mode exposes a model, date
-dimension, entity dimension, and amount measure. Use bound labels for axes and
-series descriptions. Only hard-coded recovery mode uses discovery.
+Map rows to `{ period, entity, value }`. Derive period grain, period ordering,
+rank direction, returned-entity limit, value formatting, and interaction from
+the prompt. Clarify them when absent; do not assume quarters, descending value,
+or ten entities.
 
-## Rules
+## Layout rules
 
-- **Every rule from `references/d3-in-lwc.md` applies** —
-  `lwc:dom="manual"`, `_pendingRows` buffer, D3 via `loadScript`,
-  ResizeObserver from the render function.
-- **`registerFieldsForQuery`** — two dimensions (date, account,
-  both `rowGrouping: true`), one calc measure (amount,
-  `rowGrouping: false`, NO `aggregationType`). Three specs, dims
-  first (Gate #8).
-- **Bucket dates client-side.** The SDM returns full timestamps; a
-  bump chart needs discrete time buckets (quarter / month). Group by
-  a `bucketDate(row.closeDate, 'Quarter')` function in `_handleDataUpdate`.
-  See the annotated snippet below for a reference implementation.
-- **Rank per bucket, not overall.** For each time bucket, sort
-  accounts by amount descending and assign `rank = 1..N`. That per-
-  bucket rank is Y, not the amount itself. Key insight: value
-  scales are misleading in a bump chart — rank is what makes the
-  crossings readable.
-- **Filter to top N BEFORE ranking.** With 100 accounts, a bump chart
-  is spaghetti. `MAX_TOP_N = 10` is the default. Compute total
-  amount per account across all buckets → keep top 10 → then rank
-  within each bucket.
-- **Handle missing buckets.** If an account has no rows in Q2, its
-  rank there is `null` — break the polyline at that point, don't
-  interpolate. `d3.line().defined((d) => d.rank != null)`.
-- **Curve, don't segment.** `d3.curveMonotoneX` gives the smooth
-  "flowing" look that makes bump charts readable. Sharp corners
-  (`curveLinear`) turn crossings into visual chaos.
-- **Y axis inverted.** Rank 1 is at the top of the chart, rank 10
-  at the bottom — `scaleLinear.range([topY, bottomY])`, not the
-  other way around.
+- Apply every rule in `d3-in-lwc.md`.
+- Bucket raw date values only when the prompt requests a time grain. Format
+  date-only values without UTC conversion.
+- Select a bounded entity set from the returned rows before assigning ranks.
+  Describe it as the highest or lowest entities within the returned result, not
+  a global top-N unless server ordering is proved.
+- Rank independently within each period according to the confirmed direction.
+- Use `null` for missing periods and
+  `d3.line().defined((point) => point.rank != null)` so gaps remain visible.
+- Place rank 1 at the top of the Y scale.
+- Use `d3.curveMonotoneX` for a readable flowing path.
+- Provide a textual series summary. If series highlighting is interactive,
+  support focus and keyboard alongside pointer behavior.
 
-## Annotated snippet — the rank + line render
+## Core transformation
 
 ```javascript
-_renderChart() {
-    const container = this.template.querySelector('.chart-container');
-    const { width, height } = container.getBoundingClientRect();
-    const margin = { top: 20, right: 100, bottom: 30, left: 40 };
+const periods = [...new Set(this.rows.map((row) => row.period))]
+    .sort(this._comparePeriods);
+const totals = d3.rollup(
+    this.rows,
+    (rows) => d3.sum(rows, (row) => row.value),
+    (row) => row.entity
+);
+const selectedEntities = [...totals]
+    .sort(this._compareEntityTotals)
+    .slice(0, MAX_RETURNED_ENTITIES)
+    .map(([entity]) => entity);
 
-    // rows[i] = { bucket: '2026 Q1', account: 'Acme', amount: 42000 }
-    const buckets = [...new Set(this.rows.map((d) => d.bucket))].sort();
-
-    // Top N accounts by total amount across all buckets.
-    const totals = d3.rollup(this.rows, (v) => d3.sum(v, (d) => d.amount), (d) => d.account);
-    const topAccounts = [...totals].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([a]) => a);
-
-    // Per-bucket rank map.
-    const rankByBucket = new Map();
-    buckets.forEach((b) => {
-        const inBucket = this.rows
-            .filter((d) => d.bucket === b && topAccounts.includes(d.account))
-            .sort((a, c) => c.amount - a.amount);
-        const m = new Map();
-        inBucket.forEach((d, i) => m.set(d.account, i + 1));
-        rankByBucket.set(b, m);
-    });
-
-    // Build a series per account.
-    const series = topAccounts.map((account) => ({
-        account,
-        points: buckets.map((b) => ({ bucket: b, rank: rankByBucket.get(b).get(account) ?? null }))
-    }));
-
-    const xScale = d3.scalePoint()
-        .domain(buckets).range([margin.left, width - margin.right]);
-    const yScale = d3.scaleLinear()
-        .domain([1, topAccounts.length])
-        .range([margin.top, height - margin.bottom]);   // 1 at top, N at bottom
-
-    const line = d3.line()
-        .defined((d) => d.rank != null)
-        .x((d) => xScale(d.bucket))
-        .y((d) => yScale(d.rank))
-        .curve(d3.curveMonotoneX);
-
-    const color = d3.scaleOrdinal(d3.schemeCategory10).domain(topAccounts);
-    const svg = d3.select(container).append('svg')
-        .attr('width', width).attr('height', height);
-
-    // X axis (buckets).
-    svg.append('g')
-        .attr('transform', `translate(0,${height - margin.bottom})`)
-        .call(d3.axisBottom(xScale));
-
-    // One polyline per account.
-    svg.selectAll('.series').data(series).enter()
-        .append('path').attr('class', 'series')
-        .attr('d', (s) => line(s.points))
-        .attr('fill', 'none')
-        .attr('stroke', (s) => color(s.account))
-        .attr('stroke-width', 2.5);
-
-    // Labels at the last bucket.
-    svg.selectAll('.label').data(series).enter()
-        .append('text').attr('class', 'label')
-        .attr('x', width - margin.right + 6)
-        .attr('y', (s) => {
-            const last = s.points.slice().reverse().find((p) => p.rank != null);
-            return last ? yScale(last.rank) + 4 : null;
-        })
-        .attr('font-size', 11).attr('fill', (s) => color(s.account))
-        .text((s) => s.account);
+const rankByPeriod = new Map();
+for (const period of periods) {
+    const ranked = this.rows
+        .filter((row) => period === row.period && selectedEntities.includes(row.entity))
+        .sort(this._compareRankingValues);
+    rankByPeriod.set(
+        period,
+        new Map(ranked.map((row, index) => [row.entity, index + 1]))
+    );
 }
+
+const series = selectedEntities.map((entity) => ({
+    entity,
+    points: periods.map((period) => ({
+        period,
+        rank: rankByPeriod.get(period).get(entity) ?? null
+    }))
+}));
 ```
 
-## Wiring into the pipeline
+Use prompt/binding labels for the period axis, series names, chart title, SVG
+title/description, and assistive summaries.
+
+## Query shape
 
 ```javascript
 const specs = [
-    { model: this.dateField.name, rowGrouping: true },
+    { model: this.periodField.name, rowGrouping: true },
     { model: this.entityField.name, rowGrouping: true },
-    measureSpecFromBinding(this.amountField)
+    measureSpecFromBinding(this.rankingValueField)
 ];
-// Row shape: [closeDate, account, amount].
-// In _handleDataUpdate, bucket closeDate into 'YYYY Q#' and stash on row.bucket.
+// Row contract: [period, entity, rankingValue].
 ```
 
-## Common surprises
+## Verification
 
-- **Lines all sit at the top / are horizontal.** Y scale not
-  inverted, or rank is `undefined` for most points. Log
-  `rankByBucket` to confirm.
-- **Spaghetti — 50 lines everywhere.** No top-N filter. Enforce
-  `topAccounts.slice(0, 10)`.
-- **Line jumps to Y=0 at a gap.** Missing `.defined()` on
-  `d3.line()` — the line interpolates across null.
-- **Crossings look linear and jagged.** Missing `curveMonotoneX`.
+- Unsorted input periods render in the confirmed order.
+- Ascending and descending ranking produce the expected rank 1.
+- Missing periods break paths instead of dropping to rank zero.
+- Ties use a deterministic prompt-confirmed secondary order.
+- Labels and summaries use bound field language.
+- Bounded result text does not claim a global top-N.
 
-## See also
+## DF26 worked example
 
-- SKILL.md gates: **#7** (registerFieldsForQuery), **#8** (spec order).
-- `references/d3-in-lwc.md` — every rule there applies.
-- `references/sdm-data-binding.md` - default pipeline; `sdm-table.md` is recovery only.
+For "show how our accounts ranked each quarter by amount," map period to close
+date bucketed by quarter, entity to account, and ranking value to amount. These
+choices do not apply to other bump-chart prompts.

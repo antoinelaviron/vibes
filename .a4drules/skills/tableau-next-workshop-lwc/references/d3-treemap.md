@@ -1,139 +1,89 @@
-# d3-treemap — nested rectangles by industry × account
+# D3 treemap: two-level hierarchy sized by a measure
 
-**Attribution:** shape adapted from an internal reference `treemap`
-implementation. That version pulls
-static CSV — this reference reads from the workshop's Sales Cloud
-SDM and uses `d3.hierarchy`/`d3.treemap` for a two-level nested view.
+Use a treemap when the prompt asks to show how a nonnegative quantity is
+distributed across a parent and child category.
 
-**What this teaches:** how to render a treemap — nested rectangles
-whose area is proportional to a measure, grouped by a parent
-dimension. Great for "where's my revenue concentrated" — one large
-rectangle per industry, tiled with smaller rectangles per account.
+## Semantic roles
 
-**Sales Cloud SDM fit:** grouped by `Primary_Industry` (parent) and
-`Account_Name` (child), sized by `Total_Amount_clc`. All three exist
-in the workshop template SDM. Attendee prompt shape: *"treemap of
-revenue by industry and account."*
+| Property | Type | Purpose |
+|---|---|---|
+| `parentField` | `SemanticDimension` | Top-level grouping and color |
+| `childField` | `SemanticDimension` | Leaf label |
+| `sizeField` | `SemanticMeasure` | Rectangle area |
 
-**Do NOT copy this file verbatim.** Native mode exposes a model, parent
-dimension, child dimension, and amount measure. Use bound labels in legends
-and accessible descriptions. Only hard-coded recovery mode uses discovery.
+Map rows to `{ parent, child, size }`. Derive value formatting, labels,
+interaction, and result limit from the prompt.
 
-## Rules
+## Layout rules
 
-- **Every rule from `references/d3-in-lwc.md` applies** —
-  `lwc:dom="manual"`, `_pendingRows` buffer, D3 via `loadScript`,
-  ResizeObserver from render function.
-- **`registerFieldsForQuery`** — two dimensions (industry then
-  account, both `rowGrouping: true`), one calc measure
-  (`Total_Amount_clc`, `rowGrouping: false`, NO `aggregationType`).
-  Three specs total. Dimensions first (Gate #8).
-- **Group the flat rows into a hierarchy on the client.** The SDM
-  returns a flat list of `[industry, account, amount]` rows;
-  `d3.treemap()` needs a `d3.hierarchy` tree. Build it in JS with a
-  synthetic root, one node per industry, and account leaves.
-- **`node.sum(value)` before `treemap()`.** Without `sum`, every
-  parent's value is 0 and the layout collapses.
-- **Use `paddingInner` for gaps between children,** not stroke on
-  the rect. Stroke inflates the bounding box and shifts labels.
-- **Skip labels that don't fit.** Render account name only when the
-  rect is wider than ~60px; otherwise the label overflows into
-  neighboring cells. Same for the amount underneath (~40px min).
-- **Color palette by parent (industry),** using
-  `d3.scaleOrdinal(d3.schemeCategory10)` keyed on `industry`. All
-  accounts within one industry get the same color — that's the
-  visual grouping.
-- **Cap depth at 2.** Deeper hierarchies (industry → account →
-  opportunity) render as unreadable slivers at workshop cell sizes.
+- Apply every rule in `d3-in-lwc.md`.
+- Query parent and child dimensions before the size measure.
+- Accept only finite nonnegative sizes. Exclude invalid rows with a visible
+  result note; negative areas have no valid treemap meaning.
+- Group flat rows into `root -> parent -> child` and aggregate duplicate child
+  rows within the same parent.
+- Keep child identity scoped to its parent; identical child labels under two
+  parents are distinct leaves.
+- Call `.sum()` before `d3.treemap()` or the layout collapses.
+- Sort descending by size for stable packing; this is a layout rule, not a
+  claim about global server ordering.
+- Use `paddingInner` for gaps and `paddingTop` for parent labels.
+- Draw a child label and formatted size only when each fits visually, but keep
+  every leaf in the textual accessibility summary.
+- Color by parent and provide a visible legend. Do not use color as the only
+  parent indicator.
+- Keep hierarchy depth at two for workshop readability.
 
-## Annotated snippet — hierarchy build + layout
+## Core hierarchy
 
 ```javascript
-_renderChart() {
-    const container = this.template.querySelector('.chart-container');
-    const { width, height } = container.getBoundingClientRect();
+const grouped = d3.group(this.rows, (row) => row.parent);
+const treeData = {
+    name: 'root',
+    children: [...grouped].map(([parent, rows]) => ({
+        name: parent,
+        children: [...d3.rollup(
+            rows,
+            (children) => d3.sum(children, (row) => row.size),
+            (row) => row.child
+        )].map(([child, size]) => ({ name: child, size, parent }))
+    }))
+};
 
-    // rows[i] = { industry, account, amount }
-    // Group into a tree: root → industry → account.
-    const byIndustry = d3.group(this.rows, (d) => d.industry);
-    const treeData = {
-        name: 'root',
-        children: [...byIndustry].map(([industry, accounts]) => ({
-            name: industry,
-            children: accounts.map((a) => ({
-                name: a.account, value: a.amount, industry
-            }))
-        }))
-    };
+const root = d3.hierarchy(treeData)
+    .sum((node) => node.size)
+    .sort((left, right) => right.value - left.value);
 
-    const root = d3.hierarchy(treeData)
-        .sum((d) => d.value)
-        .sort((a, b) => b.value - a.value);
-
-    d3.treemap()
-        .size([width, height])
-        .paddingInner(2)
-        .paddingTop((d) => (d.depth === 1 ? 18 : 0))  // room for industry label
-        (root);
-
-    const color = d3.scaleOrdinal(d3.schemeCategory10)
-        .domain([...byIndustry.keys()]);
-
-    const svg = d3.select(container).append('svg')
-        .attr('width', width).attr('height', height);
-
-    // Industry banners (depth 1).
-    const industries = svg.selectAll('g.industry')
-        .data(root.descendants().filter((d) => d.depth === 1))
-        .enter().append('g').attr('class', 'industry');
-    industries.append('text')
-        .attr('x', (d) => d.x0 + 4).attr('y', (d) => d.y0 + 13)
-        .attr('font-size', 12).attr('font-weight', 600).attr('fill', '#333')
-        .text((d) => d.data.name);
-
-    // Account rectangles (leaves).
-    const leaves = svg.selectAll('g.leaf')
-        .data(root.leaves()).enter().append('g').attr('class', 'leaf');
-
-    leaves.append('rect')
-        .attr('x', (d) => d.x0).attr('y', (d) => d.y0)
-        .attr('width',  (d) => d.x1 - d.x0)
-        .attr('height', (d) => d.y1 - d.y0)
-        .attr('fill', (d) => color(d.data.industry));
-
-    // Labels — only if the rect is big enough.
-    leaves.append('text')
-        .attr('x', (d) => d.x0 + 4).attr('y', (d) => d.y0 + 14)
-        .attr('font-size', 11).attr('fill', '#fff')
-        .attr('pointer-events', 'none')
-        .text((d) => ((d.x1 - d.x0) > 60 ? d.data.name : ''));
-}
+d3.treemap()
+    .size([width, height])
+    .paddingInner(2)
+    .paddingTop((node) => node.depth === 1 ? 18 : 0)(root);
 ```
 
-## Wiring into the pipeline
+Add SVG title/description plus a textual parent/child/value summary. If the
+prompt requests filtering, provide focusable keyboard-operable controls; do not
+make imperative rectangles pointer-only controls.
+
+## Query shape
 
 ```javascript
 const specs = [
     { model: this.parentField.name, rowGrouping: true },
     { model: this.childField.name, rowGrouping: true },
-    measureSpecFromBinding(this.amountField)
+    measureSpecFromBinding(this.sizeField)
 ];
-// Row shape: [industry, account, amount].
+// Row contract: [parent, child, size].
 ```
 
-## Common surprises
+## Verification
 
-- **Every rectangle is 0×0.** Missed the `.sum()` call before
-  `treemap()`. Values never propagate up the tree.
-- **Rectangles overlap the industry label.** Missing
-  `paddingTop` on depth-1 nodes — no room for the banner.
-- **All rectangles have the same color.** `scaleOrdinal.domain([])`
-  was empty (or `industry` was `undefined`) at build time.
-- **Text labels overflow into neighbors.** Missing the width guard
-  (`d.x1 - d.x0 > 60`) — always skip labels that don't fit.
+- `.sum()` runs before layout.
+- Negative and non-finite sizes are excluded and disclosed.
+- Duplicate child labels under different parents remain distinct.
+- Parent legend, labels, and assistive summary use bound role labels.
+- Visually omitted small-cell labels remain available in equivalent text.
 
-## See also
+## DF26 worked example
 
-- SKILL.md gates: **#7** (registerFieldsForQuery), **#8** (spec order).
-- `references/d3-in-lwc.md` — every rule there applies.
-- `references/sdm-data-binding.md` - default pipeline; `sdm-table.md` is recovery only.
+For "revenue by industry and account," map parent to industry, child to
+account, and size to amount. These are example mappings only.

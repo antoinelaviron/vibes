@@ -14,7 +14,7 @@ Before writing any code, load and follow these skills (in `.a4drules/skills/`):
 
 1. **`tableau-next-workshop-lwc`** — for anything involving the LWCs
    (`vibeTable`, `vibeInsight`, `vibeAction`), the Tableau Next SDK,
-   Apex-backed insights, or the Log a Call action. The skill ships
+   Apex-backed insights, or Salesforce record actions. The skill ships
    pattern references under `references/` — read the one that matches
    the current build, then author the LWC from the attendee's prompt.
 
@@ -37,7 +37,7 @@ FIRST, then act:
 - "Tableau Next", "dashboard extension", "extension LWC"
 - "vibeTable", "vibeInsight", "vibeAction"
 - "analytics__Dashboard", "semantic model", "SDM"
-- "top opportunities", "Insight button", "Log a Call"
+- "top opportunities", "Insight button", "Log a Call", "record action"
 - "Build 1", "Build 2", "Build 3"
 
 ## Landmines to avoid (the skills fix all of these)
@@ -48,11 +48,14 @@ FIRST, then act:
   errors. That produces an App Builder page, not a Tableau widget.
 - **Do NOT use `fetchDataUsingQueryAndSource` just because fields are data
   bound** — data binding supplies the source and field roles; it does not
-  require a one-off query. Translate bound properties into
-  `registerFieldsForQuery` specs so dashboard filters and parameters flow
-  into the runtime-owned query. See the LWC skill's Gate #7.
+   require a one-off query. Translate bound properties into
+   `registerFieldsForQuery` specs so dashboard filters and parameters flow
+   into the runtime-owned query. See the LWC skill's "Critical SDK and UI
+   gates" section.
 - **Do NOT call `aiplatform.ModelsAPI` from JavaScript.** Always via an
-  `@AuraEnabled` Apex method. Trust Layer routing is mandatory.
+  `@AuraEnabled` Apex method. `RecordInsightGenerator` is the pre-baked,
+  pre-deployed workshop head-start class; attendees call it but do not build or
+  modify it. Trust Layer routing is mandatory.
 - **Do NOT use `NavigationMixin`** for Salesforce navigation from within
   the extension — it silently fails inside `*--analytics.<domain>`. Use
   `window.open` with an origin-rewritten URL.
@@ -87,6 +90,13 @@ Every build should feel like the attendee's prompt authored the code.
 Do NOT copy a reference verbatim and present it as "here you go." Read
 the reference to know what shape works, then generate the file from
 the attendee's prompt, matching that shape.
+
+Before Build 1, derive and confirm a semantic role contract from the prompt:
+entity labels, property names and types, visible and hidden roles, display
+order, formatting, sorting, insight context, and requested interactions.
+Builds 2 and 3 inherit that contract unchanged and add only their requested
+feature. Opportunity, Account, Amount, and Log a Call are the canonical DF26
+worked example, not universal component defaults.
 
 ## When in doubt
 

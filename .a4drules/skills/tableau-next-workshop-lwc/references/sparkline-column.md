@@ -1,133 +1,134 @@
-# sparkline-column — per-row inline D3 sparkline in a table cell
+# Per-row D3 sparkline column
 
-**Attribution:** shape based on an internal reference `simpleBarChart`
-implementation, adapted
-here for per-row rendering inside a `<td>`. Every rule from
-`references/d3-in-lwc.md` still applies — this reference is a
-composition, not a replacement.
+Use a sparkline column when each table row needs a compact numeric trend. This
+composes the role-derived table with `d3-in-lwc.md`; it does not replace either
+contract.
 
-**What this teaches:** how to render a small (~120×24) inline D3 bar
-chart in a table cell — a per-row "sparkline" that visualizes a short
-numeric trend alongside the row's other fields. Composes the SDM
-query pipeline from `references/sdm-data-binding.md` with the D3-in-LWC
-survival rules from `references/d3-in-lwc.md`.
+## Contents
 
-**Do NOT copy this file verbatim.** A single bound measure is a scalar, not a
-trend. For real data, expose an entity dimension, period dimension, and measure
-and group periods per entity. For the workshop's synthetic mode, label the
-chart "Simulated 12-point demo trend" and state that it is derived from the
-current amount rather than historical data.
+- [Choose a data mode](#choose-a-data-mode)
+- [Rendering rules](#rendering-rules)
+- [Idempotent draw](#idempotent-draw)
+- [Template](#template)
+- [Verification](#verification)
 
-## Rules
+## Choose a data mode
 
-- **Every rule from `references/d3-in-lwc.md` applies per row.**
-  `lwc:dom="manual"` on each cell's chart container, `_pendingRows`
-  buffer for the parent, `ResizeObserver` if the cells resize.
-- **Render sparklines from `renderedCallback`,** not from
-  `_handleDataUpdate`. `renderedCallback` fires *after* the
-  `for:each` has laid down the DOM, so `template.querySelectorAll`
-  can find each row's container.
-- **Idempotency guard.** A cell's sparkline should render once per
-  row-key change; store which `rowKey` each container was drawn
-  for and skip if unchanged. Otherwise every LWC re-render redraws
-  every cell, and hovering a button flashes them all.
-- **`data-row-key` on the cell container** to look up the row
-  data during draw.
-- **Fixed pixel size.** Sparklines are meant to be dense — 120×24 or
-  100×20 pixel dimensions are fine here. This is one of the few
-  cases in `references/d3-in-lwc.md` where responsive sizing is
-  *not* required (the cell width is controlled by the parent
-  table's column sizing).
-- **No axes, no labels, no tooltip.** Sparklines are one visual
-  glance. If you find yourself adding a tooltip or a y-axis, you
-  want a full chart, not a sparkline — see
-  `references/d3-in-lwc.md`.
+### Real series
 
-## Annotated snippet — per-row draw from renderedCallback
+Require these semantic roles:
+
+| Property | Type | Purpose |
+|---|---|---|
+| `entityField` | `SemanticDimension` | Groups points into one table row |
+| `periodField` | `SemanticDimension` | Orders points within each trend |
+| `valueField` | `SemanticMeasure` | Sparkline value |
+
+Query both dimensions before the measure, map to `{ entity, period, value }`,
+sort periods using the prompt-confirmed order, and group points into
+`row.trend`.
+
+### Synthetic workshop demo
+
+Use synthetic mode only when the attendee explicitly asks for a visual demo
+without historical data. Derive a deterministic sequence from a stable row
+identity plus the current endpoint value. Never use query index or
+`Math.random()`.
+
+Require visible column text such as `Simulated 12-point demo trend` and per-row
+assistive text stating that values are simulated from the current value, not
+historical observations. The point count comes from the prompt; 12 is not a
+universal default.
+
+## Rendering rules
+
+- Apply every applicable lifecycle rule in `d3-in-lwc.md` per row.
+- Draw after the `for:each` DOM exists in `renderedCallback`.
+- Use `lwc:dom="manual"` and `data-row-key` on every spark container.
+- Track a trend signature, not only the row key. A filter can change trend
+  values while preserving identity.
+- Keep the SVG compact and decorative. Put its complete meaning in adjacent
+  per-row assistive text. In synthetic mode, also render the required disclosure
+  visibly in the column header or caption.
+- Do not add axes or hover-only tooltips. If more detail is needed, use a full
+  chart.
+
+## Idempotent draw
 
 ```javascript
-renderedCallback() {
-    this._tryStartPipeline();
-    if (!this._d3Ready || !this.rows.length) return;
-    this._drawSparklines();
-}
-
 _drawSparklines() {
     const cells = this.template.querySelectorAll('.spark-cell');
     cells.forEach((cell) => {
-        const rowKey = cell.dataset.rowKey;
-        if (cell.dataset.drawn === rowKey) return;   // Idempotent guard.
-        const row = this.rows.find((r) => r.rowKey === rowKey);
-        if (!row || !Array.isArray(row.trend) || !row.trend.length) return;
-        this._drawSparkline(cell, row.trend);
-        cell.dataset.drawn = rowKey;
+        const row = this.rows.find(
+            (candidate) => candidate.rowKey === cell.dataset.rowKey
+        );
+        const values = Array.isArray(row?.trend)
+            ? row.trend.filter((value) => Number.isFinite(value))
+            : [];
+        if (!values.length) {
+            cell.innerHTML = '';
+            delete cell.dataset.trendSignature;
+            return;
+        }
+
+        const signature = JSON.stringify(values);
+        if (cell.dataset.trendSignature === signature) return;
+        this._drawSparkline(cell, values);
+        cell.dataset.trendSignature = signature;
     });
 }
 
 _drawSparkline(container, values) {
-    // Clear any prior draw (guard makes this a no-op most of the time).
     container.innerHTML = '';
+    const d3 = this._d3;
+    const width = 120;
+    const height = 24;
+    const padding = 2;
+    const min = Math.min(0, ...values);
+    const max = Math.max(0, ...values);
+    const barWidth = (width - padding * 2) / values.length;
+    const y = d3.scaleLinear()
+        .domain(min === max ? [min - 1, max + 1] : [min, max])
+        .range([height - padding, padding]);
+    const baseline = y(0);
 
-    const W = 120, H = 24, PAD = 2;
-    const max = Math.max(1, ...values);
-    const bw  = (W - PAD * 2) / values.length;
-
-    const svg = d3.select(container).append('svg').attr('width', W).attr('height', H);
+    const svg = d3.select(container)
+        .append('svg')
+        .attr('width', width)
+        .attr('height', height)
+        .attr('aria-hidden', 'true');
     svg.selectAll('rect')
-       .data(values).enter().append('rect')
-       .attr('x', (_, i) => PAD + i * bw)
-       .attr('y', (v)    => H - (v / max) * (H - PAD * 2) - PAD)
-       .attr('width',  Math.max(1, bw - 1))
-       .attr('height', (v) => (v / max) * (H - PAD * 2))
-       .attr('fill', '#0070d2');
+        .data(values)
+        .enter()
+        .append('rect')
+        .attr('x', (value, index) => padding + index * barWidth)
+        .attr('y', (value) => Math.min(y(value), baseline))
+        .attr('width', Math.max(1, barWidth - 1))
+        .attr('height', (value) => Math.max(1, Math.abs(y(value) - baseline)))
+        .attr('fill', 'currentColor');
 }
 ```
 
-## Template — chart container per row
+## Template
 
 ```html
-<template for:each={rows} for:item="row">
-  <tr key={row.rowKey}>
-    <!-- ...other cells from the bound table... -->
-    <td>
-      <div class="spark-cell" data-row-key={row.rowKey} lwc:dom="manual"></div>
-    </td>
-  </tr>
-</template>
+<th scope="col">{trendColumnLabel}</th>
+<!-- Per row: -->
+<td>
+  <div
+    class="spark-cell"
+    data-row-key={row.rowKey}
+    lwc:dom="manual"
+  ></div>
+  <span class="slds-assistive-text">{row.trendAccessibleSummary}</span>
+</td>
 ```
 
-Note the two required attributes on the container:
+## Verification
 
-- `lwc:dom="manual"` — without it, LWC strips the SVG on the next
-  reactive update. Silent failure. See `references/d3-in-lwc.md`.
-- `data-row-key={row.rowKey}` — how `_drawSparklines` finds the
-  matching row data.
-
-## Wiring into the pipeline
-
-Two additions to the `references/sdm-data-binding.md` base:
-
-1. **Query the trend source** — add whichever spec produces the
-   numeric series (e.g. a repeated period measure, or a serialized
-   array field). Whatever shape the SDM returns, normalize it into
-   `row.trend` as a plain JS array in `_handleDataUpdate`.
-2. **Import D3** — see `references/d3-in-lwc.md` for `loadScript`
-   from the `d3` static resource. Sparklines require D3 to be ready
-   before `_drawSparklines` runs — the standard `_pendingRows`
-   buffer handles the race.
-
-## Cleanup
-
-Nothing per-row to clean up in `disconnectedCallback` — the sparkline
-DOM is inside `lwc:dom="manual"` containers that vanish with the
-component. If you added a `ResizeObserver` (rare for sparklines),
-disconnect it there.
-
-## See also
-
-- SKILL.md gates: **#3** (SLDS-first styling — sparklines don't need
-  extra CSS beyond a fixed width on the `<td>`).
-- `references/d3-in-lwc.md` — the full survival guide; every rule
-  there applies here per row.
-- `references/sdm-data-binding.md` - the underlying query pipeline the
-  sparkline attaches to.
+- Real points sort by the confirmed period semantics.
+- Changed values redraw even when `rowKey` is unchanged.
+- Synthetic values are deterministic and end at the current value.
+- Synthetic disclosure is visible and included in each row's assistive text.
+- Decorative SVGs are hidden from assistive technology; equivalent summaries
+  remain available.

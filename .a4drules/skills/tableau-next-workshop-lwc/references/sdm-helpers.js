@@ -11,11 +11,9 @@
  *   - bindingSignature(source, specs, limit)  -> stable rebind key
  *   - activeObjectNames(specKeys)             -> exact filter relevance set
  *   - qualifiedModel(object, field)          -> "Object.field"
- *   - isTopLevelFieldByName(apiName)          -> _clc / _mtc naming heuristic
- *   - isCalculatedField(modelJson, apiName)   -> model-level calcs + suffix rule
- *   - findObjectForFieldApi(modelJson, api)   -> owning object apiName
- *   - resolveUserModelString(raw, modelJson)  -> qualified OR bare top-level
- *   - pickSpecsFromModelJson(modelJson)      -> 3-spec auto-pick
+ *   - isCalculatedField(modelJson, apiName)   -> verified model-level field
+ *   - findObjectForFieldApi(modelJson, api)   -> unique owning object apiName
+ *   - resolveUserModelString(raw, modelJson)  -> verified qualified/bare model
  *   - normalizeRows(rows, specKeys)          -> keyed row objects
  */
 
@@ -74,16 +72,6 @@ function qualifiedModel(objectApi, fieldApi) {
   return `${objectApi}.${fieldApi}`;
 }
 
-// ---------------------------------------------------------------
-// 1b. Tableau Next / Data Cloud naming — calc measures often end in
-//     "_clc" and semantic metrics in "_mtc". Both are top-level on
-//     the model and must NOT be prefixed with a data object name.
-// ---------------------------------------------------------------
-function isTopLevelFieldByName(apiName) {
-  const n = (apiName || '').toLowerCase();
-  return n.endsWith('_clc') || n.endsWith('_mtc');
-}
-
 function isCalculatedField(modelJson, fieldApiName) {
   for (const cm of modelJson?.semanticCalculatedMeasurements || []) {
     if (cm.apiName === fieldApiName) return true;
@@ -91,114 +79,81 @@ function isCalculatedField(modelJson, fieldApiName) {
   for (const cd of modelJson?.semanticCalculatedDimensions || []) {
     if (cd.apiName === fieldApiName) return true;
   }
-  return isTopLevelFieldByName(fieldApiName);
+  for (const metric of modelJson?.semanticMetrics || []) {
+    if (metric.apiName === fieldApiName) return true;
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------
 // 2. Find which data object owns a given field apiName.
 //    Walks semanticDataObjects[].semanticDimensions/semanticMeasurements.
-//    Returns null when the field is model-level (calculated / _clc / _mtc).
-//    Otherwise falls back to the first data object.
+//    Returns null when the field is a verified model-level field.
+//    Throws when a bare field is ambiguous or unknown; prompt-derived roles
+//    must never be assigned to an arbitrary first object.
 // ---------------------------------------------------------------
 function findObjectForFieldApi(modelJson, fieldApiName) {
   const objs = modelJson?.semanticDataObjects || [];
+  const matches = [];
   for (const obj of objs) {
     for (const d of obj.semanticDimensions || []) {
       if (d.apiName === fieldApiName) {
-        return obj.apiName;
+        matches.push(obj.apiName);
       }
     }
     for (const m of obj.semanticMeasurements || []) {
       if (m.apiName === fieldApiName) {
-        return obj.apiName;
+        matches.push(obj.apiName);
       }
     }
   }
   if (isCalculatedField(modelJson, fieldApiName)) {
     return null;
   }
-  return objs[0]?.apiName ?? null;
+  const uniqueMatches = [...new Set(matches)];
+  if (uniqueMatches.length === 1) return uniqueMatches[0];
+  if (uniqueMatches.length > 1) {
+    throw new Error(
+      `Field "${fieldApiName}" exists on multiple semantic objects; use Object.field.`
+    );
+  }
+  throw new Error(`Field "${fieldApiName}" was not found in the semantic model.`);
 }
 
 // ---------------------------------------------------------------
 // 3. Qualify a user-supplied field string against SDM JSON.
-//    - "Object.field" -> returned as-is
+//    - "Object.field" -> verified and returned
 //    - top-level calcs / *_clc / *_mtc -> bare apiName (no Object. prefix)
-//    - "field" on an entity -> "Object.field"; else first object fallback
+//    - unique "field" on an object -> "Object.field"
 // ---------------------------------------------------------------
 function resolveUserModelString(raw, modelJson) {
   const t = (raw || '').trim();
   if (!t) return '';
-  if (t.includes('.')) return t;
+  if (t.includes('.')) {
+    const [objectApi, fieldApi, ...extra] = t.split('.');
+    if (!objectApi || !fieldApi || extra.length) {
+      throw new Error(`Invalid semantic field "${t}"; expected Object.field.`);
+    }
+    const object = (modelJson?.semanticDataObjects || []).find(
+      (candidate) => candidate.apiName === objectApi
+    );
+    if (!object) throw new Error(`Semantic object "${objectApi}" was not found.`);
+    const exists = [
+      ...(object.semanticDimensions || []),
+      ...(object.semanticMeasurements || [])
+    ].some((field) => field.apiName === fieldApi);
+    if (!exists) throw new Error(`Field "${t}" was not found in the semantic model.`);
+    return t;
+  }
   if (isCalculatedField(modelJson, t)) {
     return t;
   }
   const obj = findObjectForFieldApi(modelJson, t);
-  if (obj) return qualifiedModel(obj, t);
-  const fallbackObj = modelJson?.semanticDataObjects?.[0]?.apiName;
-  return fallbackObj ? qualifiedModel(fallbackObj, t) : t;
+  return qualifiedModel(obj, t);
 }
 
 // ---------------------------------------------------------------
-// 4. Auto-pick three specs: date dimension, non-id text dimension,
-//    first measurement with its aggregationType.
-//    Returns null if any of the three cannot be found.
-// ---------------------------------------------------------------
-function pickSpecsFromModelJson(modelJson) {
-  const objects = modelJson?.semanticDataObjects || [];
-  if (!objects.length) return null;
-
-  let dateField = null, dateObj = null;
-  let dimField = null, dimObj = null;
-  let measField = null, measObj = null;
-  let measAgg = 'Sum';
-
-  for (const obj of objects) {
-    const oName = obj.apiName;
-    for (const d of obj.semanticDimensions || []) {
-      const dt = d.dataType;
-      const api = d.apiName;
-      if ((dt === 'Date' || dt === 'DateTime') && !dateField) {
-        dateField = api;
-        dateObj = oName;
-      }
-      if (
-        dt === 'Text' &&
-        !dimField &&
-        api &&
-        !api.toLowerCase().endsWith('_id') &&
-        !api.toLowerCase().includes('external_id')
-      ) {
-        dimField = api;
-        dimObj = oName;
-      }
-    }
-    for (const m of obj.semanticMeasurements || []) {
-      if (!measField && m.apiName) {
-        measField = m.apiName;
-        measObj = oName;
-        measAgg = m.aggregationType || 'Sum';
-      }
-    }
-  }
-
-  if (!dateField || !dimField || !measField) return null;
-
-  const specs = [
-    { model: qualifiedModel(dateObj, dateField), rowGrouping: true },
-    { model: qualifiedModel(dimObj, dimField), rowGrouping: true },
-    {
-      model: qualifiedModel(measObj, measField),
-      rowGrouping: false,
-      aggregationType: measAgg
-    }
-  ];
-  const summary = `${specs[0].model}, ${specs[1].model}, ${specs[2].model} (agg ${measAgg})`;
-  return { specs, summary };
-}
-
-// ---------------------------------------------------------------
-// 5. Normalize fetchData() output to { [qualifiedModel]: value } rows.
+// 4. Normalize dataUpdate output to { [qualifiedModel]: value } rows.
 //
 //    The SDK returns rows in one of three shapes:
 //      a) Array of objects keyed by qualified "Object.field"  -> pass through
@@ -238,8 +193,8 @@ function normalizeRows(rows, specKeys) {
     }
 
     // Object: pass through if already qualified; otherwise re-key from bare.
-    const hasQualified = keys.some((k) => k in row);
-    if (hasQualified) {
+    const hasAllExpectedKeys = keys.every((k) => k in row);
+    if (hasAllExpectedKeys) {
       out.push(row);
     } else {
       const mapped = {};
