@@ -6,6 +6,10 @@
  * Keep them at file scope (above the `export default class`).
  *
  * Covers:
+ *   - normalizeAggregation(value)             -> register-fields enum
+ *   - measureSpecFromBinding(binding)         -> bound measure spec
+ *   - bindingSignature(source, specs, limit)  -> stable rebind key
+ *   - activeObjectNames(specKeys)             -> exact filter relevance set
  *   - qualifiedModel(object, field)          -> "Object.field"
  *   - isTopLevelFieldByName(apiName)          -> _clc / _mtc naming heuristic
  *   - isCalculatedField(modelJson, apiName)   -> model-level calcs + suffix rule
@@ -14,6 +18,54 @@
  *   - pickSpecsFromModelJson(modelJson)      -> 3-spec auto-pick
  *   - normalizeRows(rows, specKeys)          -> keyed row objects
  */
+
+// ---------------------------------------------------------------
+// Native binding helpers. Semantic property values are guaranteed objects;
+// do not coerce legacy strings into these shapes.
+// ---------------------------------------------------------------
+function normalizeAggregation(value) {
+  const key = String(value || '').replace(/[\s_-]/g, '').toLowerCase();
+  const values = {
+    sum: 'Sum',
+    avg: 'Average',
+    average: 'Average',
+    min: 'Min',
+    max: 'Max',
+    median: 'Median',
+    count: 'Count',
+    countdistinct: 'CountDistinct',
+    stddev: 'StdDev',
+    var: 'Var',
+    varp: 'VarP',
+    useragg: 'UserAgg'
+  };
+  return values[key] || null;
+}
+
+function measureSpecFromBinding(binding) {
+  if (!binding?.name) throw new Error('A measure binding is required.');
+  const spec = { model: binding.name, rowGrouping: false };
+  if (!binding.name.includes('.')) return spec;
+
+  const aggregationType = normalizeAggregation(binding.aggregation);
+  if (!aggregationType) {
+    throw new Error(`Unsupported measure aggregation: ${binding.aggregation}`);
+  }
+  return { ...spec, aggregationType };
+}
+
+function bindingSignature(sourceName, specs, limit) {
+  return JSON.stringify({ sourceName, specs, limit });
+}
+
+function activeObjectNames(specKeys) {
+  const names = new Set();
+  for (const key of specKeys || []) {
+    if (typeof key !== 'string' || !key.includes('.')) continue;
+    names.add(key.split('.')[0]);
+  }
+  return names;
+}
 
 // ---------------------------------------------------------------
 // 1. Qualified "Object.field" model string

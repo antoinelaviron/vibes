@@ -20,7 +20,9 @@ the workshop template SDM. Attendee prompt shape: *"radar chart
 comparing win rate, avg deal size, sales cycle, pipeline, and
 opportunity count across industries."*
 
-**Do NOT copy this file verbatim.** SDM apiNames come from discovery.
+**Do NOT copy this file verbatim.** Native mode exposes a model, one entity
+dimension, and five role-specific measure bindings. Use each binding's label
+for axes and legends. Only hard-coded recovery mode uses discovery.
 
 ## Rules
 
@@ -119,12 +121,12 @@ _renderChart() {
 
 ```javascript
 const specs = [
-    { model: `${OBJ_ACCOUNT}.<industry-dim>`,  rowGrouping: true  },
-    { model: '<win-rate-apiName>_clc',         rowGrouping: false },
-    { model: '<avg-deal-apiName>_clc',         rowGrouping: false },
-    { model: '<sales-cycle-apiName>_clc',      rowGrouping: false },
-    { model: '<pipeline-apiName>_clc',         rowGrouping: false },
-    { model: '<opp-count-apiName>_clc',        rowGrouping: false }
+    { model: this.entityField.name, rowGrouping: true },
+    measureSpecFromBinding(this.winRateField),
+    measureSpecFromBinding(this.averageDealField),
+    measureSpecFromBinding(this.salesCycleField),
+    measureSpecFromBinding(this.pipelineField),
+    measureSpecFromBinding(this.opportunityCountField)
 ];
 // Row shape: [industry, winRate, avgDeal, salesCycle, pipeline, oppCount].
 ```
@@ -143,4 +145,4 @@ const specs = [
 
 - SKILL.md gates: **#7** (registerFieldsForQuery), **#8** (spec order).
 - `references/d3-in-lwc.md` — every rule there applies.
-- `references/sdm-table.md` — same pipeline shape, different render.
+- `references/sdm-data-binding.md` - default pipeline; `sdm-table.md` is recovery only.

@@ -16,7 +16,9 @@ month) × `Account_Name`, ranked by `Total_Amount_clc`. All three
 exist in the workshop template SDM. Attendee prompt shape: *"bump
 chart showing how our top 10 accounts have ranked each quarter."*
 
-**Do NOT copy this file verbatim.** SDM apiNames come from discovery.
+**Do NOT copy this file verbatim.** Native mode exposes a model, date
+dimension, entity dimension, and amount measure. Use bound labels for axes and
+series descriptions. Only hard-coded recovery mode uses discovery.
 
 ## Rules
 
@@ -128,9 +130,9 @@ _renderChart() {
 
 ```javascript
 const specs = [
-    { model: `${OBJ_OPPORTUNITY}.<close-date-dim>`, rowGrouping: true  },
-    { model: `${OBJ_ACCOUNT}.<account-name-dim>`,    rowGrouping: true  },
-    { model: '<amount-calc-apiName>_clc',            rowGrouping: false }
+    { model: this.dateField.name, rowGrouping: true },
+    { model: this.entityField.name, rowGrouping: true },
+    measureSpecFromBinding(this.amountField)
 ];
 // Row shape: [closeDate, account, amount].
 // In _handleDataUpdate, bucket closeDate into 'YYYY Q#' and stash on row.bucket.
@@ -151,4 +153,4 @@ const specs = [
 
 - SKILL.md gates: **#7** (registerFieldsForQuery), **#8** (spec order).
 - `references/d3-in-lwc.md` — every rule there applies.
-- `references/sdm-table.md` — same pipeline, different render.
+- `references/sdm-data-binding.md` - default pipeline; `sdm-table.md` is recovery only.

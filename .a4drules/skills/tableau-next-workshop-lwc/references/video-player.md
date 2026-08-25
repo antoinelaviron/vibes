@@ -31,7 +31,7 @@ already workshop-ready as written.
 - **No SDK, no `@api sdk`, no `connectedCallback` pipeline.** All
   state comes from `@api` property setters wired to the dashboard
   property panel (`js-meta.xml`). Nothing in this file touches
-  `registerFieldsForQuery` or `registerDataSource`.
+  `registerFieldsForQuery` or any data-source registration.
 - **Detect YouTube vs MP4 from the URL, not a separate toggle.** A
   regex against `youtu.be/`, `youtube.com/watch?v=`, and
   `youtube.com/embed/` covers the three common formats attendees will
@@ -176,7 +176,7 @@ Template — two mutually exclusive branches, no `lwc:dom="manual"`:
 ```xml
 <?xml version="1.0" encoding="UTF-8" ?>
 <LightningComponentBundle xmlns="http://soap.sforce.com/2006/04/metadata">
-    <apiVersion>60.0</apiVersion>
+    <apiVersion>67.0</apiVersion>
     <isExposed>true</isExposed>
     <targets>
         <target>analytics__Dashboard</target>

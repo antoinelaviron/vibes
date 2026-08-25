@@ -7,10 +7,10 @@ extension. The tricky part is that the extension runs inside
 silently — this pattern rewrites the origin and opens the action in a
 new tab.
 
-**Do NOT copy this file verbatim.** The quick-action name
-(`Global.LogACall`), the ID-carrying dimension field name, and the
-`OBJ_` constants are placeholders — the real ones come from the
-attendee's SDM discovery hand-off and their org's quick-action config.
+**Do NOT copy this file verbatim.** The quick-action name must match the org's
+configuration. In the default path, the ID-carrying field comes from the
+required `accountIdField: SemanticDimension` binding. Only hard-coded recovery
+mode obtains it from discovery.
 
 ## Rules
 
@@ -30,7 +30,10 @@ attendee's SDM discovery hand-off and their org's quick-action config.
   should be, and the URL becomes `recordId=<dollar amount>`. See
   SKILL.md Gate #8.
 - **Hidden column.** The ID is used for the URL, NOT rendered as a
-  visible `<td>`. Store as `row.accountId`; do not add a header cell.
+   visible `<td>`. Store as `row.accountId`; do not add a header cell.
+- **Validate before opening.** Render the action disabled or omit it when the
+  role is unmapped. Accept only a 15- or 18-character Account ID beginning
+  with `001`; this catches an amount accidentally mapped into `recordId`.
 - **Use `<lightning-button-icon>`,** not `<lightning-button>` — the
   label wraps in narrow columns and looks bad. Set
   `alternative-text` and `title`, and pass the ID via
@@ -43,14 +46,15 @@ attendee's SDM discovery hand-off and their org's quick-action config.
 ```javascript
 handleLogACallClick(event) {
     const accountId = event.currentTarget.dataset.accountId;
-    if (!accountId) return;
+    if (!/^001[a-zA-Z0-9]{12}(?:[a-zA-Z0-9]{3})?$/.test(accountId || '')) return;
 
     // Rewrite origin: *--analytics.<domain>  →  <base>.lightning.force.com
     const base = window.location.origin.replace(/--analytics\..+/, '.lightning.force.com');
+    if (!base.endsWith('.lightning.force.com')) return;
     const url  = `${base}/lightning/action/quick/Global.LogACall?recordId=${encodeURIComponent(accountId)}`;
 
     // window.open, NOT NavigationMixin — the analytics iframe blocks the mixin silently.
-    window.open(url, '_blank');
+    window.open(url, '_blank', 'noopener');
 }
 ```
 
@@ -73,6 +77,14 @@ const IDX = {
     ACCOUNT_ID: <n-1>,
     AMOUNT:     <n>          // measure — always last
 };
+```
+
+In native mode, use the required bound role instead of an `OBJ_` placeholder:
+
+```javascript
+if (this.accountIdField?.name) {
+    dimensionSpecs.push({ model: this.accountIdField.name, rowGrouping: true });
+}
 ```
 
 Symptom you'll see if you get this wrong: the Log a Call button opens
@@ -111,4 +123,5 @@ mapped.push({
   dimension goes before measures), **#3** (SLDS-first styling).
 - `references/apex-insight-panel.md` — the panel-swap this pattern
   layers onto.
-- `references/sdm-table.md` — the underlying query pipeline.
+- `references/sdm-data-binding.md` - native role metadata and rebinding.
+- `references/sdm-table.md` - hard-coded recovery pipeline.

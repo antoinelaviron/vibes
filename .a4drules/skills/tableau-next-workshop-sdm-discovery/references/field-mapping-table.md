@@ -7,6 +7,9 @@
 > apiName is org-specific, and field naming can drift. If a term below
 > doesn't appear verbatim in `/tmp/sdm.json`, treat it as absent.
 
+This reference is for the hard-coded/recovery branch only. In the default
+data-bound branch, the dashboard author selects fields in the widget panel.
+
 Fuzzy attendee terms → likely API names in a Sales-Cloud-flavored SDM.
 Use as a first-pass hint; then confirm each proposal against
 `/tmp/sdm.json`. If the term isn't listed, substring-match across the
@@ -66,8 +69,8 @@ alternative doesn't exist in `/tmp/sdm.json`.
 | win rate metric | `Win_Rate_mtc` (label "Win Rate") |
 | avg deal size metric | `Avg_Deal_Size_Won_mtc` (label "Avg Deal Size (Won)") |
 | pipeline metric | `Pipeline_Generation_mtc` (label "Pipeline Generation") |
-| # of opps metric | look up under `metrics[]` in `/tmp/sdm.json` — the workshop template's apiName has been observed as `of_Opportunities_mtc` (leading `#` stripped by the platform) but this varies; DO NOT hardcode |
-| open opps metric | look up under `metrics[]` — the workshop template's apiName has been observed as `Open_Opportunities` (no `_mtc` suffix, unlike its siblings); verify |
+| # of opps metric | look up under `semanticMetrics[]` in `/tmp/sdm.json` — the workshop template's apiName has been observed as `of_Opportunities_mtc` (leading `#` stripped by the platform) but this varies; DO NOT hardcode |
+| open opps metric | look up under `semanticMetrics[]` — the workshop template's apiName has been observed as `Open_Opportunities` (no `_mtc` suffix, unlike its siblings); verify |
 | CSAT metric | `Customer_Satisfaction_mtc` (label "Average CSAT") |
 | NPS metric | `Net_Promoter_Score_mtc` (label "Average NPS") |
 | resolution time metric | `Resolution_Time_mtc` (label "Resolution Time") |
@@ -88,10 +91,10 @@ alternative doesn't exist in `/tmp/sdm.json`.
 If the attendee's term doesn't match any row above, do a substring match
 against `/tmp/sdm.json`:
 
-1. Against `metrics[].label` (case-insensitive)
-2. Against `metrics[].apiName`
-3. Against `calculatedMeasures[].fieldName`
-4. Against `objects[].dimensions[].fieldName` (per object)
+1. Against `semanticMetrics[].label` (case-insensitive)
+2. Against `semanticMetrics[].apiName`
+3. Against `semanticCalculatedMeasurements[].apiName`
+4. Against `semanticDataObjects[].semanticDimensions[].apiName` (per object)
 
 Present the top 2-3 candidates to the attendee. If nothing matches, say
 "No field matches '<term>' in this SDM. Available fields include: <top 10

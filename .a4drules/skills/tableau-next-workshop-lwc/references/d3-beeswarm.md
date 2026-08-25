@@ -17,8 +17,9 @@ measure, X position). All three exist in the workshop template SDM.
 Attendee prompt shape: *"show every opportunity as a dot on an amount
 axis, colored by stage."*
 
-**Do NOT copy this file verbatim.** SDM apiNames come from the
-discovery hand-off.
+**Do NOT copy this file verbatim.** In native mode, expose bindings for the
+model, opportunity ID dimension, stage dimension, and amount measure. Only
+hard-coded recovery mode gets API names from discovery.
 
 ## Rules
 
@@ -27,8 +28,8 @@ discovery hand-off.
   D3 via `loadScript` from the `d3` static resource (not a CDN — the
   analytics iframe's CSP blocks arbitrary CDNs), `ResizeObserver`
   attached from the render function.
-- **`registerFieldsForQuery`** — same 5-step pipeline as
-  `references/sdm-table.md`. All dimensions first, calc measure last
+- **`registerFieldsForQuery`** - use the binding-aware pipeline from
+  `references/sdm-data-binding.md`. All dimensions first, measure last
   (Gate #8). Query one row per opportunity — a raw
   `Opportunity.Opportunity_Id` dimension, NOT a rollup.
 - **`d3.forceCollide` runs on the client** — no server-side layout.
@@ -111,9 +112,9 @@ Gate #8):
 
 ```javascript
 const specs = [
-    { model: `${OBJ_OPPORTUNITY}.<opportunity-id-dim>`, rowGrouping: true },
-    { model: `${OBJ_OPPORTUNITY}.<stage-dim>`,          rowGrouping: true },
-    { model: '<amount-calc-apiName>_clc',               rowGrouping: false }
+    { model: this.opportunityIdField.name, rowGrouping: true },
+    { model: this.stageField.name, rowGrouping: true },
+    measureSpecFromBinding(this.amountField)
 ];
 // Row shape: [opportunityId, stage, amount].
 ```
@@ -141,5 +142,5 @@ full redraw is simpler than animating enter/exit.
 
 - SKILL.md gates: **#7** (registerFieldsForQuery), **#8** (spec order).
 - `references/d3-in-lwc.md` — every rule there applies here.
-- `references/sdm-table.md` — the underlying pipeline this replaces
+- `references/sdm-data-binding.md` - the underlying pipeline this replaces
   visually (no table markup in beeswarm — the SVG is the whole widget).

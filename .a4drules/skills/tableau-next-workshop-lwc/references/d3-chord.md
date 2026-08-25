@@ -17,7 +17,9 @@ visually the most unexpected thing in the menu.
 three exist in the workshop template SDM. Attendee prompt shape:
 *"chord diagram showing how opportunity type relates to stage."*
 
-**Do NOT copy this file verbatim.** SDM apiNames come from discovery.
+**Do NOT copy this file verbatim.** Native mode exposes a model, source
+dimension, target dimension, and count measure. Use bound labels to prefix
+node names by role. Only hard-coded recovery mode uses discovery.
 
 ## Rules
 
@@ -32,11 +34,10 @@ three exist in the workshop template SDM. Attendee prompt shape:
 - **`d3.chord()` needs one square matrix, not two dimensions.** Build
   a single node list by concatenating both categories'
   values — `nodes = [...typeValues, ...stageValues]` — then a
-  `nodes.length × nodes.length` matrix. Fill `matrix[typeIndex][stageIndex]
-  = count` for every row; leave every other cell `0` (type↔type,
-  stage↔stage, and the mirrored stage→type direction). The matrix
-  does not need to be symmetric — `d3.chord()` draws a one-directional
-  ribbon fine when only one triangle has values.
+  `nodes.length × nodes.length` matrix. For readable two-sided geometry,
+  mirror each count into both `matrix[typeIndex][stageIndex]` and
+  `matrix[stageIndex][typeIndex]`. The semantic relationship remains
+  Type-to-Stage; symmetry here prevents destination arcs from collapsing.
 - **SDM rows are sparse; the matrix must be dense.** Initialize every
   cell to `0` before filling from rows, or `d3.chord()` throws on
   `undefined`.
@@ -67,8 +68,9 @@ _renderChart() {
     const matrix = nodes.map(() => nodes.map(() => 0));
     this.rows.forEach((r) => {
         const i = typeValues.indexOf(r.type);
-        const j = stageValues.length + stageValues.indexOf(r.stage);
-        matrix[i][j] = r.count;
+        const j = typeValues.length + stageValues.indexOf(r.stage);
+        matrix[i][j] += r.count;
+        matrix[j][i] += r.count;
     });
 
     const chord = d3.chord().padAngle(0.04).sortSubgroups(d3.descending);
@@ -117,9 +119,9 @@ _renderChart() {
 
 ```javascript
 const specs = [
-    { model: `${OBJ_OPPORTUNITY}.<type-dim-apiName>`,  rowGrouping: true  },
-    { model: `${OBJ_OPPORTUNITY}.<stage-dim-apiName>`, rowGrouping: true  },
-    { model: '<opp-count-apiName>_clc',                rowGrouping: false }
+    { model: this.sourceField.name, rowGrouping: true },
+    { model: this.targetField.name, rowGrouping: true },
+    measureSpecFromBinding(this.countField)
 ];
 // Row shape: [type, stage, count].
 ```
@@ -133,7 +135,7 @@ Row mapping in `_handleDataUpdate`:
   zero-initialized before filling — every `nodes.length × nodes.length`
   cell needs a value, most of them `0`.
 - **Ribbons connect the wrong arcs.** `j` index computed without the
-  `stageValues.length` offset — type and stage share one node array,
+  `typeValues.length` offset — type and stage share one node array,
   so stage indices start after all type indices, not at `0`.
 - **Half the labels are upside down.** Missing the `angle > Math.PI`
   flip on the label `rotate()`.

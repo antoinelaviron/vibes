@@ -1,4 +1,8 @@
-# sdm-table — Tableau Next SDM-backed table (Build 1 pattern)
+# sdm-table - hard-coded recovery pattern
+
+**Recovery mode only.** Native data binding is the default Build 1 path; read
+`references/sdm-data-binding.md` first. Use this file only when the attendee
+explicitly asks for the basic hard-coded wire contract or needs recovery.
 
 **What this teaches:** how to render a table inside an
 `analytics__Dashboard` LWC whose rows come from a semantic data model
@@ -13,10 +17,9 @@ come from the discovery hand-off JSON produced by
 
 ## Rules
 
-- **5-step SDK pipeline** — `registerDataSource` → `getJson` →
-  `notifyLifecycleChange('init')` → `_subscribeEvents()` →
-  `registerFieldsForQuery`. Order is not negotiable. See SKILL.md
-  "The canonical SDK pipeline".
+- **Registered SDK pipeline** — subscribe and set loading before
+  `registerFieldsForQuery`. The method registers the source and fetches data
+  internally. Do not call a private `registerDataSource` method.
 - **`registerFieldsForQuery`, never `fetchDataUsingQueryAndSource`.**
   Only the register-fields path lets the dashboard runtime inject
   filter/parameter context on refetch. See SKILL.md Gate #7.
@@ -44,17 +47,10 @@ come from the discovery hand-off JSON produced by
 
 ```javascript
 async _runPipeline() {
-    // 1. Required — without it, workloadName=undefined-undefined.
-    this.sdk.registerDataSource(SOURCE_NAME);
-
-    // 2. Warm SDM JSON — surfaces auth errors early.
-    const src = await this.sdk.getDataSource?.(SOURCE_NAME);
-    src?.getJson?.();
-
-    // 3. Lifecycle: init.
+    // 1. Lifecycle: init.
     this.sdk.actions?.notifyLifecycleChange?.('init');
 
-    // 4. Build specs: dims FIRST, measures LAST. Gate #8.
+    // 2. Build specs: dims FIRST, measures LAST. Gate #8.
     const specs = [
         { model: `${OBJ_OPPORTUNITY}.<dim-apiName>`, rowGrouping: true  },
         { model: `${OBJ_ACCOUNT}.<dim-apiName>`,     rowGrouping: true  },
@@ -62,10 +58,11 @@ async _runPipeline() {
         // NO aggregationType on _clc — SDM owns it.
     ];
 
-    // 5. Subscribe BEFORE register — DATA_UPDATE can fire synchronously.
+    // 3. Subscribe and set loading BEFORE register.
     this._subscribeEvents();
+    this._setLoadingState();
 
-    // 6. Register — SDK fetches + auto-refetches on filter/param changes.
+    // 4. Register — SDK registers the source, fetches, and auto-refetches.
     this.sdk.registerFieldsForQuery(specs, SOURCE_NAME, { limit: QUERY_LIMIT });
 }
 ```
@@ -108,8 +105,6 @@ export default class VibeTable extends LightningElement {
     }
     async _runPipeline() {
         try {
-            this.sdk.registerDataSource(SOURCE_NAME);
-            try { (await this.sdk.getDataSource?.(SOURCE_NAME))?.getJson?.(); } catch (e) { /* warn */ }
             this.sdk.actions?.notifyLifecycleChange?.(LIFE_CYCLE.INIT);
             const specs = [
                 { model: `${OBJ_OPPORTUNITY}.<dim-apiName>`, rowGrouping: true },
@@ -117,6 +112,7 @@ export default class VibeTable extends LightningElement {
                 { model: '<calc-measure-apiName>_clc',       rowGrouping: false }
             ];
             this._subscribeEvents();
+            this._setLoadingState();
             this.sdk.registerFieldsForQuery(specs, SOURCE_NAME, { limit: QUERY_LIMIT });
             this._isQueryRegistered = true;
         } catch (err) {
@@ -167,3 +163,5 @@ export default class VibeTable extends LightningElement {
   before writing the LWC.
 - `references/apex-insight-panel.md` — Build 2 layers a per-row panel
   onto this pattern.
+- `references/sdm-data-binding.md` - default role-based metadata and runtime
+  rebinding pattern.

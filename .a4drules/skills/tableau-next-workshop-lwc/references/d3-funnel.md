@@ -16,7 +16,9 @@ via `Number_of_Opportunities_clc`. Both exist in the workshop
 template SDM. Attendee prompt shape: *"funnel chart showing how many
 opportunities are in each stage."*
 
-**Do NOT copy this file verbatim.** SDM apiNames come from discovery.
+**Do NOT copy this file verbatim.** Native mode exposes a model, stage
+dimension, and count measure. Use bound labels for visible and accessible
+text. Only hard-coded recovery mode uses discovery.
 
 ## Rules
 
@@ -115,8 +117,8 @@ _renderChart() {
 
 ```javascript
 const specs = [
-    { model: `${OBJ_OPPORTUNITY}.<stage-dim>`, rowGrouping: true  },
-    { model: '<opp-count-apiName>_clc',         rowGrouping: false }
+    { model: this.stageField.name, rowGrouping: true },
+    measureSpecFromBinding(this.opportunityCountField)
 ];
 // Row shape: [stage, oppCount].
 ```
@@ -138,4 +140,4 @@ Row mapping in `_handleDataUpdate`:
 
 - SKILL.md gates: **#7** (registerFieldsForQuery), **#8** (spec order).
 - `references/d3-in-lwc.md` — every rule there applies.
-- `references/sdm-table.md` — same pipeline, different render.
+- `references/sdm-data-binding.md` - default pipeline; `sdm-table.md` is recovery only.

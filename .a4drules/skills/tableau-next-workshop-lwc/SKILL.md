@@ -9,13 +9,13 @@ description: |
   of the three workshop LWCs.
   Do NOT use for generic Lightning pages (Home / Record / App). Do NOT use for
   Tableau Cloud Extensions API (.trex files). Do NOT use for calculated field
-  or metric creation — that's tableau-next-workshop-sdm-discovery's territory.
+  or metric creation.
 license: Apache-2.0
 metadata:
   author: alaviron
-  version: workshop-3.0
+  version: workshop-4.0
   fork_of: tableau-next-custom-lwc
-  api-version: v66.0
+  api-version: v67.0
 ---
 
 # tableau-next-workshop-lwc
@@ -27,19 +27,48 @@ deleted.
 **Do not reuse outside DF26.** For production LWC work, use the canonical
 `tableau-next-custom-lwc` skill at `alaviron/tableau-skills`.
 
+## Default architecture: native data binding
+
+Generate SDM-backed workshop components with native Tableau Next data
+binding by default. The component declares semantic roles in metadata;
+the dashboard author maps those roles in the widget panel after deployment.
+
+| Role type | Metadata type | Runtime value |
+|---|---|---|
+| Semantic model | `SemanticModel` | `{ apiName, id, label }` |
+| Measure | `SemanticMeasure` | `{ name, aggregation, label }` |
+| Dimension | `SemanticDimension` | `{ name, label }` |
+
+Read these guaranteed object shapes directly. Do not accept legacy string
+fallbacks, derive display labels from API names, or insert hard-coded field
+names when a binding is missing. Use API version 67.0 and declare
+each role under `<targetConfig targets="analytics__Dashboard">`.
+
+Read `references/sdm-data-binding.md` before generating any SDM-backed
+component. It owns the metadata contract, runtime rebinding controller,
+aggregation rules, registered-query pipeline, and verification gate.
+
+### Hard-coded recovery mode
+
+The original discovery-driven path remains available when the attendee asks
+to learn the basic wire contract or needs the recovery build. Only in that
+mode, invoke `tableau-next-workshop-sdm-discovery`, confirm the live mapping,
+and compile the confirmed source and fields into constants. Read
+`references/sdm-table.md` for that path.
+
 ## The three builds — one LWC per build
 
 Each build creates a NEW LWC. Attendees do NOT edit a single file across
-prompts. Build 1 is scaffolded from scratch (with the SDK pipeline
-plumbed in via the discovery skill). Builds 2 and 3 start from the
+prompts. Build 1 is scaffolded from scratch with native semantic bindings.
+Builds 2 and 3 start from the
 attendee's own deployed LWC from the previous build — that's the
 natural source of truth, and mirrors what a stuck attendee would do
 if the facilitator handed them the recovery kit.
 
 | Build | LWC folder | Reference pattern | What it does |
 |---|---|---|---|
-| **1** | `lwc/vibeTable/` | `references/sdm-table.md` | Table of top 25 opportunities from the SDM, reacts to filters |
-| **2** | `lwc/vibeInsight/` | `references/sdm-table.md` + `references/apex-insight-panel.md` | Build 1 + per-row Insight button → AI narrative panel |
+| **1** | `lwc/vibeTable/` | `references/sdm-data-binding.md` | Bound opportunity table, reacts to filters |
+| **2** | `lwc/vibeInsight/` | prior build + `references/apex-insight-panel.md` | Build 1 + per-row Insight button → AI narrative panel |
 | **3** | `lwc/vibeAction/` | prior two + `references/salesforce-action-link.md` | Build 2 + per-row Log a Call button |
 
 **Why per-build LWCs**: each build lands as a distinct, working file
@@ -48,8 +77,12 @@ at each one on the dashboard. An attendee who falls behind is unblocked
 by the facilitator recovery kit (outside this skill), not by copying an
 asset out of it.
 
-**Why hardcoded field names** (no `@api` config): this is a workshop —
-attendees see literal values in the code. Cleaner, faster to grasp.
+**Why native binding:** attendees create an extension whose semantic roles are
+mapped in the dashboard instead of compiled into code. After the live release
+gate proves the SDK's remount/cancellation behavior, it can also be retargeted
+to another compatible model without editing and redeploying code. The skill
+absorbs the lifecycle complexity; the attendee sees semantic roles rather
+than org-specific API names.
 
 ## Critical gates (must follow)
 
@@ -64,14 +97,17 @@ attendees see literal values in the code. Cleaner, faster to grasp.
    authored from their prompt, not watch you paste a starter. For
    Builds 2 and 3, also read the attendee's already-deployed LWC from
    the previous build (`force-app/main/default/lwc/vibe<Prev>/`) —
-   that's the natural source of truth for the query shape, the `IDX`
-   map, and the sort order, so the new file stays consistent with what
-   they wrote.
+   that's the natural source of truth for the binding contract, query shape,
+   the `IDX` map, and the sort order, so the new file stays consistent with
+   what they wrote.
 
-2. **Discovery-first for Build 1 — live discovery, not cached mapping.**
-   Never write SDK code until you have a hand-off JSON from
+2. **Native binding first; discovery-first only in recovery mode.** For the
+   default path, define and confirm a role-based binding contract, then expose
+   those roles as semantic metadata properties. Do not discover or hardcode a
+   concrete SDM. For hard-coded recovery mode, never write SDK code until you
+   have a hand-off JSON from
    `tableau-next-workshop-sdm-discovery` whose values came from a live
-   `sf api request rest /services/data/v66.0/ssot/semantic/models[/…]`
+   `sf api request rest /services/data/v67.0/ssot/semantic/models[/…]`
    call against the attendee's org **in this session**. Cached mappings
    from the discovery skill's `references/field-mapping-table.md` are
    NOT acceptable substitutes — that file is a hint fallback, not a data
@@ -98,8 +134,11 @@ attendees see literal values in the code. Cleaner, faster to grasp.
    URL must be rewritten from the analytics domain to the Lightning domain.
    `NavigationMixin` does NOT work inside `*--analytics.<domain>`.
 
-7. **Fetch via `registerFieldsForQuery` (Builds 1+).** NEVER
-   `fetchDataUsingQueryAndSource`. This is the ONLY path that lets the
+7. **Query bound fields via `registerFieldsForQuery` (Builds 1+).** Data
+   binding does not change the query transport. Translate `sdmName.apiName`
+   and each bound field's `name` into field specs. Do not use
+   `fetchDataUsingQueryAndSource` merely because fields are bound. The
+   registered path lets the
    dashboard's active filters and parameters flow into the query
    automatically. `fetchDataUsingQueryAndSource` sends `queryJson`
    verbatim to the semantic engine — filters/parameters do NOT flow,
@@ -107,9 +146,11 @@ attendees see literal values in the code. Cleaner, faster to grasp.
    there is no supported wire shape for injecting them manually (the
    `StructuredSemanticQuery` message has no `filters` field —
    HAR-verified against a live viz payload, 2026-07-29). See
-   "The canonical SDK pipeline" below for the required order of calls.
+   `references/sdm-data-binding.md` for the native controller and
+   `references/sdm-table.md` for recovery-mode call order.
 
-8. **Spec order rule: declare ALL dimensions BEFORE any measure.**
+8. **Spec order rule: declare ALL dimensions BEFORE any measure.** This
+   applies equally to specs built from bound properties.
    `registerFieldsForQuery` returns rows whose columns are grouped by
    `rowGrouping` — every `rowGrouping: true` spec is delivered first,
    every `rowGrouping: false` spec last, regardless of the order you
@@ -140,6 +181,11 @@ attendees see literal values in the code. Cleaner, faster to grasp.
     getting the placement wrong wastes 5 minutes per attendee looking for
     a "puzzle-piece Components tab" that doesn't exist.
 
+11. **Bindings are a persisted dashboard contract.** Never rename, remove,
+    change the type of, or repurpose a binding property in a deployed bundle.
+    Add a new optional property or create a new LWC bundle. Never expose
+    runtime-injected `sdk` in metadata.
+
 ## Post-deploy: telling the attendee how to add the widget
 
 After a successful `sf project deploy start ... --source-dir ...`,
@@ -159,8 +205,10 @@ Components tab, or a puzzle-piece icon — none of those apply.
 > 3. The extensions picker opens with a list of your custom LWC
 >    extensions. Find **`Vibe <Name>`** in that list.
 > 4. Drag it onto your dashboard canvas.
+> 5. In the widget panel, select the semantic model and map every required
+>    dimension and measure role. Select the aggregation for each measure.
 >
-> That's it. The widget renders on drop.
+> The widget renders as soon as all required roles are mapped.
 
 Substitute `<lwc-name>` with the folder name (e.g. `vibeTable`) and
 `Vibe <Name>` with the `<masterLabel>` from the meta.xml
@@ -175,326 +223,53 @@ called `vibeTable` — a table of my top opportunities."
 
 **Your job:**
 
-1. **Call `tableau-next-workshop-sdm-discovery` FIRST.** Do not proceed
-   without a confirmed field mapping. Present the mapping to the attendee,
-   wait for "yes".
+1. **Define the binding contract first.** Present these role names and confirm
+   them with the attendee. Do not select a concrete SDM or field API names in
+   the default path:
+
+   - `sdmName` — `SemanticModel`
+   - `opportunityIdField` — `SemanticDimension`
+   - `accountNameField` — `SemanticDimension`
+   - `stageField` — `SemanticDimension`
+   - `closeDateField` — `SemanticDimension`
+   - `typeField` — `SemanticDimension`
+   - `amountField` — `SemanticMeasure`
 
 2. **Scaffold `force-app/main/default/lwc/vibeTable/` from scratch.**
    Three files (`vibeTable.js`, `vibeTable.html`, `vibeTable.js-meta.xml`),
    `<target>analytics__Dashboard</target>`, class `VibeTable`,
-   `<masterLabel>Vibe Table</masterLabel>`, `apiVersion` 60+.
-   Consult `references/sdm-table.md` for the exact shape — every apiName
-   and `SOURCE_NAME` still comes from the discovery hand-off. See
-   "The canonical SDK pipeline" and "The canonical Build 1 file" below.
+   `<masterLabel>Vibe Table</masterLabel>`, `apiVersion` 67.0.
+   Consult `references/sdm-data-binding.md` for the exact metadata and
+   runtime shape. See
+   the native data-binding reference. The pipeline and full file below are
+   retained only for hard-coded recovery mode.
 
-3. **Write the pipeline using `registerFieldsForQuery`.** The 5-step
-   order (registerDataSource → getJson → notifyLifecycleChange(init) →
-   subscribe → registerFieldsForQuery) is not negotiable. `dataUpdate`
-   is the only data path. Never call `fetchData()`. See the canonical
-   file below for the exact shape.
+3. **Write the binding-aware pipeline using `registerFieldsForQuery`.**
+   Wait until all required properties are mapped, subscribe before the first
+   registration, and build dimensions before measures. `dataUpdate` is the
+   only data path. Never call `fetchData()` after registration or from
+   filter/parameter handlers.
 
-4. **The attendee needs to see Vibes author from their prompt**, not
+4. **Hard-coded recovery exception.** If the attendee explicitly chooses
+   recovery mode, call `tableau-next-workshop-sdm-discovery`, wait for the
+   confirmed hand-off, and use `references/sdm-table.md` instead.
+
+5. **The attendee needs to see Vibes author from their prompt**, not
    receive a pre-baked file. Read the canonical file to know the shape,
    then generate the LWC from the attendee's prompt matching that shape.
 
-### The canonical SDK pipeline — HAR-verified 2026-07-29
+### Shared query contract
 
-**The 5-step order below is not negotiable.** Skipping any step (or
-reordering) reproduces the exact failure the old workshop test hit on
-2026-07-10: silent no-op, `workloadName=undefined-undefined` in the
-Network payload, wasted attendee time.
+Both native and hard-coded modes use `registerFieldsForQuery`, subscribe to
+`dataUpdate` before registration, keep all dimensions before measures, consume
+Proxy rows positionally, and never call `fetchData()` after registration or
+from filter/parameter handlers. Raw object measures use their selected
+aggregation; bare model-level calculated measurements omit it. Semantic
+metrics remain a verified hard-coded/manual-query concern.
 
-```
-1. registerDataSource(sourceName)                  — idempotent, required
-2. await getDataSource(sourceName).getJson()       — warms the source
-3. notifyLifecycleChange('init')                   — mark initializing
-4. _subscribeEvents()                              — BEFORE register
-5. registerFieldsForQuery(specs, sourceName, {limit}) — SDK fetches +
-                                                       emits DATA_UPDATE
-                                                       + auto-refetches
-                                                       on filter/param
-```
-
-Rules that make the pipeline work:
-
-- **`registerDataSource` is mandatory.** Without it `registerFieldsForQuery`
-  fires with `workloadName=undefined-undefined` and gets rejected.
-- **Subscribe BEFORE register.** `DATA_UPDATE` can fire synchronously
-  inside `registerFieldsForQuery`'s internal fetch — subscribe first or
-  miss the initial payload.
-- **`DATA_UPDATE` is the only data path.** Not `filterChange`, not
-  `parameterChange`, not an explicit `fetchData()`. See "Event handlers"
-  below.
-- **Never call `fetchData()` yourself.** `registerFieldsForQuery` calls
-  it internally. A second call races and triggers `setErrorState`.
-
-### Field-shape rules (the specs passed to registerFieldsForQuery)
-
-Each spec is a `SemanticQueryField`: `{ model, rowGrouping, aggregationType? }`.
-
-| Field kind | `model` | `rowGrouping` | `aggregationType` |
-|---|---|---|---|
-| Raw table dimension | `"Object.field"` (qualified) | `true` | omit |
-| Raw table measure | `"Object.field"` (qualified) | `false` | `'Sum'` (or `'Avg'`, `'Min'`, `'Max'`, `'Count'`, `'CountDistinct'`) |
-| Model-level `*_clc` calc | `"MyCalc_clc"` (**BARE — no object prefix**) | `false` | **omit — do NOT set** |
-| Model-level `*_mtc` metric | `"MyMetric_mtc"` (**BARE — no object prefix**) | `false` | **omit — do NOT set** |
-
-**The `aggregationType` rule is the single biggest failure mode.** Setting
-it on a `_clc` / `_mtc` field produces the semantic engine error:
-
-> *Summary formula cannot have aggregation method different than NONE/AUTO/USER_AGG*
-
-The SDM already owns the aggregation for these fields (`UserAgg`,
-`Average`, etc.) — passing `aggregationType: 'Sum'` overrides it to
-`SEMANTIC_AGGREGATION_METHOD_SUM` and the engine rejects. Leave it off.
-
-### The calc-measure lesson (this is where 90% of first attempts fail)
-
-A calc measure like `Total_Amount_clc` is **not addressable as an
-object-qualified field**. If you write `model: "Opportunity.Total_Amount_clc"`,
-the semantic layer's error is:
-
-> *The field Total_Amount_clc does not exist in table Opportunity.*
-
-That's because `_clc` fields are **model-scoped**, not object-scoped.
-Their expression can reference multiple objects — e.g.
-`SUM([Opportunity_Product].[Product_Quantity] * [Opportunity_Product].[List_Price_Amount])`.
-The field lives at the SDM level; the `model` string stays bare.
-
-- Every raw dimension → `"Object.field"`, `rowGrouping: true`.
-- Every raw measure → `"Object.field"`, `rowGrouping: false`, `aggregationType: '<Sum|Avg|…>'`.
-- Every `_clc` / `_mtc` field → bare `"apiName"`, `rowGrouping: false`,
-  **NO `aggregationType`**.
-
-### Row-shape rules
-
-- Rows returned via `DATA_UPDATE` are **positional array-like Proxies**.
-  `row[i]` works. `Array.isArray(row)` is `false`. `.length` works.
-  **Access by index.**
-- Declaration order in the `specs[]` array == row column order. Keep an `IDX` map:
-
-    ```javascript
-    const IDX = {
-      OPPORTUNITY_ID: 0,
-      ACCOUNT_NAME: 1,
-      STAGE: 2,
-      // ...
-    };
-    ```
-
-- `for:each` in the template requires a unique `key` — cannot be `i` alone.
-  Compose one:
-
-    ```javascript
-    rowKey: `row-${i}-${row[IDX.OPPORTUNITY_ID] || ''}`
-    ```
-
-### Filter/parameter — flows automatically (VERIFIED)
-
-`registerFieldsForQuery` registers the query with the dashboard runtime.
-The runtime owns the query and re-fires it automatically whenever
-dashboard filters or parameters change, injecting the current filter
-context on every refetch. **You do not build a `filters` clause. You do
-not read `dashboardState.filters`. You do not call `fetchData()`.**
-
-Event handlers are UI-only:
-
-```javascript
-_subscribeEvents() {
-    this._unsubscribes.push(
-        // DATA_UPDATE: the SDK's fired-for-you path. This is the ONLY
-        // place row state gets mutated. Fires for initial load AND for
-        // every SDK-driven refetch (filter, parameter, dataspace).
-        this.sdk.on('dataUpdate', (rows) => this._handleDataUpdate(rows)),
-
-        // filterChange / parameterChange: UI-only signals. Flip a
-        // loading flag; DO NOT call fetchData() — SDK refetches
-        // internally and a second call races and errors the widget.
-        this.sdk.on('filterChange',    () => this._setLoadingState()),
-        this.sdk.on('parameterChange', () => this._setLoadingState())
-    );
-}
-```
-
-**Verified working, 2026-07-29** against the workshop template SDM on
-`orgfarm-5fc1b8c97a`: change an Account_Name filter on the dashboard →
-`filterChange` fires (spinner) → SDK refetches with the new filter
-context → `DATA_UPDATE` arrives with the filtered rows → widget renders.
-Zero code from us builds the filter clause.
-
-### The canonical Build 1 file (registerFieldsForQuery pipeline)
-
-**Every apiName and `SOURCE_NAME` value below is a placeholder. They
-MUST come from the discovery hand-off JSON produced by
-`tableau-next-workshop-sdm-discovery` in this session. Copying the
-tokens verbatim will fail on any attendee org.**
-
-```javascript
-import { LightningElement, api, track } from 'lwc';
-
-const TAG = '[vibeTable]';
-
-const SDK_EVENTS = {
-    DATA_UPDATE: 'dataUpdate',
-    FILTER_CHANGE: 'filterChange',
-    PARAMETER_CHANGE: 'parameterChange'
-};
-
-const LIFE_CYCLE = {
-    INIT: 'init',
-    LOADED: 'loaded',
-    ERROR: 'error',
-    NO_DATA: 'nodata'
-};
-
-// From discovery hand-off — SDM apiName in the attendee's org.
-const SOURCE_NAME = '<from discovery hand-off — do NOT copy>';
-
-// Per-object constants — use OBJ_ prefix, never SDO_.
-const OBJ_OPPORTUNITY = '<object-apiName-from-discovery>';
-const OBJ_ACCOUNT     = '<object-apiName-from-discovery>';
-
-const QUERY_LIMIT = 25;
-
-// Order MUST match specs[] declaration order in _runPipeline.
-const IDX = {
-    OPPORTUNITY_ID: 0,
-    ACCOUNT_NAME:   1,
-    STAGE:          2,
-    CLOSE_DATE:     3,
-    TYPE:           4,
-    AMOUNT:         5
-};
-
-const LOADING_SAFETY_MS = 8000;
-
-export default class VibeTable extends LightningElement {
-    @api sdk;
-
-    @track rows = [];
-    @track _isLoading = true;
-    @track _hasError = false;
-    @track _errorMessage = '';
-
-    _pipelineStarted = false;
-    _isQueryRegistered = false;
-    _unsubscribes = [];
-    _loadingTimer = null;
-
-    connectedCallback() { this._tryStartPipeline(); }
-    renderedCallback() { this._tryStartPipeline(); }
-
-    disconnectedCallback() {
-        this._unsubscribes.forEach((u) => typeof u === 'function' && u());
-        this._unsubscribes = [];
-        if (this._loadingTimer) { clearTimeout(this._loadingTimer); this._loadingTimer = null; }
-    }
-
-    _tryStartPipeline() {
-        if (this._pipelineStarted) return;
-        if (!this.sdk) return;   // SDK injected AFTER connectedCallback — renderedCallback retries
-        this._pipelineStarted = true;
-        this._runPipeline();
-    }
-
-    async _runPipeline() {
-        try {
-            // 1. registerDataSource — required before anything else.
-            this.sdk.registerDataSource(SOURCE_NAME);
-
-            // 2. Warm the SDM JSON so auth errors surface early.
-            try {
-                const src = await this.sdk.getDataSource?.(SOURCE_NAME);
-                src?.getJson?.();
-            } catch (e) { console.warn(TAG, 'getDataSource/getJson warning:', e); }
-
-            // 3. Lifecycle: init.
-            this.sdk.actions?.notifyLifecycleChange?.(LIFE_CYCLE.INIT);
-
-            // 4. Build specs. Object.field for raw, BARE for _clc/_mtc.
-            //    NO aggregationType on _clc/_mtc — SDM owns aggregation.
-            //    ORDER MATTERS: all dimensions (rowGrouping: true) FIRST,
-            //    then all measures (rowGrouping: false). The SDK reorders
-            //    interleaved specs silently and your IDX will be off. See Gate #8.
-            const specs = [
-                { model: `${OBJ_OPPORTUNITY}.<dim-apiName-from-discovery>`, rowGrouping: true },
-                { model: `${OBJ_ACCOUNT}.<dim-apiName-from-discovery>`,     rowGrouping: true },
-                // ...more dimensions...
-                { model: '<calc-measure-apiName-from-discovery>_clc',       rowGrouping: false }
-            ];
-
-            // 5. Subscribe BEFORE register — DATA_UPDATE can fire synchronously.
-            this._subscribeEvents();
-
-            // 6. Register. SDK internally fetches + emits DATA_UPDATE +
-            //    auto-refetches on filter/parameter changes.
-            this.sdk.registerFieldsForQuery(specs, SOURCE_NAME, { limit: QUERY_LIMIT });
-            this._isQueryRegistered = true;
-        } catch (err) {
-            console.error(TAG, 'pipeline failed:', err);
-            this._hasError = true;
-            this._errorMessage = String(err?.message || err);
-            this._isLoading = false;
-            this.sdk.actions?.notifyLifecycleChange?.(LIFE_CYCLE.ERROR, { message: this._errorMessage });
-        }
-    }
-
-    _subscribeEvents() {
-        if (typeof this.sdk.on !== 'function') return;
-        this._unsubscribes.push(
-            this.sdk.on(SDK_EVENTS.DATA_UPDATE, (rows) => this._handleDataUpdate(rows)),
-            this.sdk.on(SDK_EVENTS.FILTER_CHANGE,    () => this._isQueryRegistered && this._setLoadingState()),
-            this.sdk.on(SDK_EVENTS.PARAMETER_CHANGE, () => this._isQueryRegistered && this._setLoadingState())
-        );
-    }
-
-    _handleDataUpdate(raw) {
-        if (this._loadingTimer) { clearTimeout(this._loadingTimer); this._loadingTimer = null; }
-        const rows = raw == null ? [] : raw;
-        const length = typeof rows.length === 'number' ? rows.length : 0;
-        const mapped = [];
-        for (let i = 0; i < length; i++) {
-            const r = rows[i];
-            if (!r) continue;
-            mapped.push({
-                rowKey: `row-${i}-${r[IDX.OPPORTUNITY_ID] || ''}`,
-                opportunityId: r[IDX.OPPORTUNITY_ID] ?? null,
-                accountName:   r[IDX.ACCOUNT_NAME]   ?? null,
-                // ...map each IDX to a named row property...
-                amount:        Number(r[IDX.AMOUNT]) || 0
-            });
-        }
-        this.rows = mapped.sort((a, b) => (b.amount || 0) - (a.amount || 0));
-        this._isLoading = false;
-        this._hasError = false;
-        this.sdk.actions?.notifyLifecycleChange?.(
-            this.rows.length ? LIFE_CYCLE.LOADED : LIFE_CYCLE.NO_DATA
-        );
-    }
-
-    _setLoadingState() {
-        this._isLoading = true;
-        if (this._loadingTimer) clearTimeout(this._loadingTimer);
-        // Safety net if DATA_UPDATE never arrives (e.g. filter fired pre-registration).
-        this._loadingTimer = setTimeout(() => {
-            if (this._isLoading) this._isLoading = false;
-            this._loadingTimer = null;
-        }, LOADING_SAFETY_MS);
-    }
-
-    get hasRows() { return this.rows.length > 0; }
-}
-```
-
-The full annotated pattern (rules, snippet, and a placeholder-ified
-end-to-end file) lives at `references/sdm-table.md`. Read that file;
-do not copy it wholesale into `force-app/…`.
-
-Note on cross-table joins: an SDM that joins `Opportunity_Product ↔
-Opportunity ↔ Account` (or similar) lets you reference fields on any
-joined object as `"OtherObject.field"` — the join is done by the
-semantic engine, not your specs. Only propose cross-object fields that
-appear in the discovery hand-off. Do not assume a join exists.
+Read `references/sdm-data-binding.md` for the default metadata and rebinding
+controller. Read `references/sdm-table.md` for the full hard-coded recovery
+pipeline, field-shape examples, row mapping, and filter behavior.
 
 ---
 
@@ -508,8 +283,9 @@ table, plus an Insight button per row that gets an AI narrative."
 
 1. **Start from the attendee's deployed `vibeTable` code**
    (`force-app/main/default/lwc/vibeTable/` — they wrote it in Build 1
-   and it's the natural source of truth for the query shape and `IDX`
-   map). Read `references/apex-insight-panel.md` for the panel-swap
+   and it's the natural source of truth for the binding contract, query
+   shape, and `IDX` map). Keep every semantic property name and type
+   unchanged. Read `references/apex-insight-panel.md` for the panel-swap
    pattern and the exact Apex-call shape you're adding. Then author
    `vibeInsight` from the attendee's prompt matching that shape. New
    folder, new class name (`VibeInsight`), new `<masterLabel>Vibe Insight</masterLabel>`.
@@ -528,100 +304,11 @@ table, plus an Insight button per row that gets an AI narrative."
     const narrative = await generateInsight({ rowJson: JSON.stringify(payload) });
     ```
 
-### The panel-swap pattern (NOT a modal, NOT an inline expand)
-
-**Tried and rejected:**
-- Inline row expansion (extra `<tr>`) — LWC template rules make this ugly and the layout jitters on load.
-- Fixed-position modal — `position: fixed` inside the analytics iframe is fixed to the iframe viewport, not the page. Backdrop bleeds through the iframe's boundary. Looks awful.
-
-**What works:** replace the entire widget content with the insight view when active. Two mutually exclusive states:
-
-- **Table mode**: render the table normally.
-- **Insight mode**: hide the table, render a header (title + back arrow) and a body (spinner / narrative / error).
-
-```javascript
-@track modalOpen = false;
-@track modalRow = null;
-@track modalLoading = false;
-@track modalText = '';
-@track modalError = '';
-
-get showTable() { return this.hasRows && !this.modalOpen; }
-get modalTitle() {
-    if (!this.modalRow) return 'Opportunity Insight';
-    return `Insight — ${this.modalRow.accountName || this.modalRow.opportunityId}`;
-}
-
-async handleInsightClick(event) {
-    const rowKey = event.currentTarget.dataset.rowKey;
-    const row = this.rows.find((r) => r.rowKey === rowKey);
-    if (!row) return;
-
-    this.modalRow = row;
-    this.modalOpen = true;
-    this.modalLoading = true;
-    this.modalText = '';
-    this.modalError = '';
-
-    const payload = {
-        Opportunity_Id: row.opportunityId,
-        Account: row.accountName,
-        Stage: row.stage,
-        Close_Date: row.closeDate,
-        Type: row.type,
-        Amount: row.amount
-    };
-    try {
-        const text = await generateInsight({ rowJson: JSON.stringify(payload) });
-        this.modalText = text || '(empty response)';
-    } catch (e) {
-        this.modalError = String(e?.body?.message || e?.message || e);
-    } finally {
-        this.modalLoading = false;
-    }
-}
-
-handleModalClose() {
-    this.modalOpen = false;
-    this.modalRow = null;
-    this.modalLoading = false;
-    this.modalText = '';
-    this.modalError = '';
-}
-```
-
-Template shape:
-
-```html
-<template lwc:if={showTable}>
-  <!-- normal table -->
-</template>
-<template lwc:if={modalOpen}>
-  <div class="slds-p-around_medium insight-panel">
-    <div class="slds-grid slds-grid_align-spread slds-p-bottom_small slds-border_bottom">
-      <h3 class="slds-text-heading_small">{modalTitle}</h3>
-      <lightning-button-icon icon-name="utility:back" variant="bare" onclick={handleModalClose}></lightning-button-icon>
-    </div>
-    <div class="slds-p-top_medium">
-      <template lwc:if={modalLoading}> ... spinner ... </template>
-      <template lwc:if={modalText}><p class="insight-narrative">{modalText}</p></template>
-      <template lwc:if={modalError}><p class="slds-text-color_error">Insight failed: {modalError}</p></template>
-    </div>
-  </div>
-</template>
-```
-
-And a tiny `.css`:
-
-```css
-.insight-panel { min-height: 12rem; }
-.insight-narrative { font-size: 1rem; line-height: 1.5; }
-```
-
-**Refetch wipes insight state.** When `filterChange`/`parameterChange`
-fires, close the panel and clear cached state — stale data → invalid insight.
-
-**Error surfacing.** If Apex throws, render the error string. Do NOT hide it.
+Use the panel-swap pattern from `references/apex-insight-panel.md`: render the
+table or the insight panel, never a fixed-position modal. That reference owns
+the state, stale-request token, focus transfer, template, and error behavior.
+Refreshes and binding changes must close the panel and invalidate pending Apex
+requests.
 
 ---
 
@@ -640,57 +327,27 @@ same table + Insight, plus a Log a Call button per row."
    name, and the "hidden ID dimension goes BEFORE the measure" spec
    ordering (Gate #8). Then author `vibeAction` from the attendee's
    prompt. New folder, new class name (`VibeAction`), new
-   `<masterLabel>Vibe Action</masterLabel>`.
-2. **Add a hidden `accountId` field to the query** — we need it for the Log a Call URL. In this SDM, the Opportunity's `CustomerAccount` field IS the Account record ID (it's a lookup, not a name). Query it, store as `row.accountId`, but do NOT display it in a column.
+   `<masterLabel>Vibe Action</masterLabel>`. Preserve all inherited semantic
+   property names and types.
+2. **Add `accountIdField` as a required `SemanticDimension` binding.** Query
+   it as a hidden dimension, store it as `row.accountId`, and do not display
+   it in a column. Do not assume a specific SDM field name. `vibeAction` is a
+   new bundle, so its initial contract can require this role.
 3. **Add the Log a Call button per row.**
 
-### Origin rewrite (mandatory)
-
-The extension runs inside `*--analytics.<domain>`. Standard navigation from
-that origin fails silently. Rewrite to `.lightning.force.com`:
-
-```javascript
-handleLogACallClick(event) {
-    const accountId = event.currentTarget.dataset.accountId;
-    if (!accountId) return;
-    const base = window.location.origin.replace(/--analytics\..+/, '.lightning.force.com');
-    const url = `${base}/lightning/action/quick/Global.LogACall?recordId=${encodeURIComponent(accountId)}`;
-    window.open(url, '_blank');
-}
-```
-
-**Rules:**
-- `Global.LogACall` is the exact quick-action name. Don't invent
-  `Account.LogACall` or `Global.Log_a_Call`.
-- Use `window.open(url, '_blank')`. Do NOT use `NavigationMixin` — it does
-  not work inside the analytics iframe.
-- `accountId` comes from the query — in this workshop's SDM, the
-  Opportunity's `CustomerAccount` field IS the Account record ID. Use it.
-
-Button in the template — use `<lightning-button-icon>` (not
-`<lightning-button>` with a label) — the label wraps in narrow columns
-and looks bad:
-
-```html
-<td class="slds-text-align_center">
-  <lightning-button-icon
-    icon-name="utility:log_a_call"
-    variant="border"
-    alternative-text="Log a Call"
-    title="Log a Call on this account"
-    data-account-id={row.accountId}
-    onclick={handleLogACallClick}
-  ></lightning-button-icon>
-</td>
-```
+Use the origin rewrite and validated Account-ID handler from
+`references/salesforce-action-link.md`. That reference owns the exact
+`Global.LogACall` action name, `001...` validation, hidden-dimension ordering,
+button accessibility, and `window.open` behavior.
 
 ---
 
 ## Cross-cutting gotchas
 
 **SDK undefined in `connectedCallback`.** `@api sdk` is injected AFTER
-`connectedCallback` on `analytics__Dashboard` widgets. Always guard with
-`_pipelineStarted` and re-enter from `renderedCallback`:
+`connectedCallback` on `analytics__Dashboard` widgets. Hard-coded recovery
+mode uses the guarded re-entry below; native mode uses the binding sync
+controller in `sdm-data-binding.md`:
 
 ```javascript
 connectedCallback() { this._tryStartPipeline(); }
@@ -706,6 +363,18 @@ _tryStartPipeline() {
 
 **Never `<property name="sdk">` in meta.xml.** `@api sdk` is
 runtime-injected — declaring it as a `<property>` causes a deploy error.
+
+**Semantic bindings belong in meta.xml.** Unlike `sdk`, `sdmName` and every
+role-specific field property must be declared under the
+`analytics__Dashboard` target config. API version 67.0 is required.
+
+**Bindings arrive after construction and can change.** A one-shot
+`_pipelineStarted` guard is only valid for hard-coded recovery mode. Native
+data-bound components compare a stable binding signature and re-register once
+when the model, field, aggregation, or limit changes. See
+`references/sdm-data-binding.md`. Because `dataUpdate` has no query token,
+in-place retargeting remains experimental until the live gate proves remount or
+request cancellation.
 
 **`ShowToastEvent` is silently dropped** in a dashboard extension.
 
@@ -730,15 +399,17 @@ patterns, put `key` on a real DOM element (`<tr>`, `<tbody>`).
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| Query 400: *"Summary formula cannot have aggregation method different than NONE/AUTO/USER_AGG"* | `aggregationType` set on a `_clc` / `_mtc` spec | Remove `aggregationType` from those specs — SDM owns aggregation for calc measures/metrics |
-| Query 400: *"field X does not exist in table Y"* | `_clc`/`_mtc` written as `"Object.field"` | Use bare `model: "myField_clc"` — calc/metric fields are model-scoped |
-| `workloadName=undefined-undefined` in Network payload, silent no-op | Missing `registerDataSource(SOURCE_NAME)` before `registerFieldsForQuery` | Call `registerDataSource` first — always |
+| Query 400: *"Summary formula cannot have aggregation method different than NONE/AUTO/USER_AGG"* | `aggregationType` set on a bare calculated measurement | Remove `aggregationType` — the SDM owns aggregation for calculated measurements |
+| Query 400: *"field X does not exist in table Y"* | A model-level calculated field written as `"Object.field"` | Use its bare `model` name |
 | Widget errors mid-load, `setErrorState` fires | Called `fetchData()` after `registerFieldsForQuery` (or from `filterChange` handler) | Never call `fetchData()` — SDK fetches internally. Event handlers are UI-only |
 | Widget renders on load but never reacts to filters | Using `fetchDataUsingQueryAndSource` instead of `registerFieldsForQuery` | Switch paths — see Gate #7. `fetchDataUsingQueryAndSource` bypasses the dashboard's filter runtime |
 | Initial payload missing rows | Subscribed to `dataUpdate` AFTER calling `registerFieldsForQuery` | Subscribe first — `DATA_UPDATE` can fire synchronously inside `registerFieldsForQuery` |
 | Table empty but no error | Positional row-read mismatch | Verify `IDX` map matches spec declaration order |
 | Text/ID column shows a number (e.g. `recordId=4822.56` in a URL, dollar amount where an account ID should be) | Dimension declared AFTER a measure in `specs[]` — SDK reordered it so dimensions come first, measures last. `IDX` is off by one column | See Gate #8. Rearrange `specs[]` so ALL `rowGrouping: true` specs come before any `rowGrouping: false` spec, then update `IDX` to match |
 | Pipeline never runs | SDK undefined in `connectedCallback`, no re-entry | Call `_tryStartPipeline()` from both `connectedCallback` and `renderedCallback` |
+| Widget shows configuration message | One or more required semantic roles are unmapped | Select a model and map every required role in the widget panel; do not add a hard-coded fallback |
+| Configuration panel is empty | API version below 67.0 or native data binding is disabled in the org | Set `<apiVersion>67.0</apiVersion>` and verify the org feature |
+| Widget shows old data after remapping | One-shot pipeline or duplicate binding registration | Use the binding signature controller in `sdm-data-binding.md`; verify replacement behavior in a live dashboard |
 | Widget deploys but not visible in dashboard picker | Wrong target in meta.xml | Ensure `<target>analytics__Dashboard</target>` |
 | Log a Call button does nothing | Missing origin rewrite | Rewrite `--analytics.<domain>` → `.lightning.force.com` before `window.open` |
 | Modal has gray stripe on the widget iframe boundary | Using `position: fixed` inside the iframe | Use panel-swap pattern instead of a modal |
@@ -752,6 +423,7 @@ patterns, put `key` on a real DOM element (`<tr>`, `<tbody>`).
 ├── README.md                         ← short overview
 └── references/
     ├── sdm-helpers.js                ← copy-paste SDK helper functions
+    ├── sdm-data-binding.md           ← default Build 1 metadata + rebinding pattern
     ├── smoke-test-query.md           ← curl the SDM query before writing LWC
     ├── sdm-table.md                  ← Build 1 pattern (SDM query + table)
     ├── apex-insight-panel.md         ← Build 2 pattern (Apex + panel-swap)
@@ -769,10 +441,10 @@ patterns, put `key` on a real DOM element (`<tr>`, `<tbody>`).
 
 Each reference is a **pattern**, not a starter. Read it, understand
 the rules and the shape, then author from the attendee's prompt —
-never dump the reference verbatim into `force-app/…`. Every
-org-specific token (`SOURCE_NAME`, object apiNames, field apiNames,
-Apex class names) is a placeholder to be replaced from the discovery
-hand-off (Gate #2).
+never dump the reference verbatim into `force-app/…`. In the default path,
+SDM source and field API names come from native bound objects at runtime.
+Only the hard-coded recovery references contain org-specific placeholders
+supplied by discovery.
 
 **When the attendee asks for "something other than a table"** — a
 chart, viz, or shape — the 6 `d3-<name>.md` references cover the

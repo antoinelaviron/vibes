@@ -12,8 +12,9 @@ several common D3 patterns silently — this reference documents the
 workarounds.
 
 **Do NOT copy this file verbatim.** Static-resource names, chart
-dimensions, and SDM field references are placeholders — everything
-org-specific comes from the attendee's org and discovery hand-off.
+dimensions, and SDM field references are placeholders. In native mode they
+come from the resolved binding contract; only hard-coded recovery mode uses a
+discovery hand-off.
 
 ## Rules
 
@@ -142,7 +143,7 @@ disconnectedCallback() {
 
 ## See also
 
-- SKILL.md — the general SDK pipeline lives in `references/sdm-table.md`;
+- SKILL.md - the default SDK pipeline lives in `references/sdm-data-binding.md`;
   D3 layers a rendering path on top of it, but everything about the
   query itself (specs, `IDX`, subscribe-before-register) is unchanged.
 - `references/sparkline-column.md` — per-row inline sparklines using

@@ -9,13 +9,14 @@ composition, not a replacement.
 **What this teaches:** how to render a small (~120×24) inline D3 bar
 chart in a table cell — a per-row "sparkline" that visualizes a short
 numeric trend alongside the row's other fields. Composes the SDM
-query pipeline from `references/sdm-table.md` with the D3-in-LWC
+query pipeline from `references/sdm-data-binding.md` with the D3-in-LWC
 survival rules from `references/d3-in-lwc.md`.
 
-**Do NOT copy this file verbatim.** The `trend` field name is a
-placeholder — the actual trend source depends on the SDM (a repeated
-numeric measure, a JSON string field, or an array of period-over-
-period rollups).
+**Do NOT copy this file verbatim.** A single bound measure is a scalar, not a
+trend. For real data, expose an entity dimension, period dimension, and measure
+and group periods per entity. For the workshop's synthetic mode, label the
+chart "Simulated 12-point demo trend" and state that it is derived from the
+current amount rather than historical data.
 
 ## Rules
 
@@ -87,7 +88,7 @@ _drawSparkline(container, values) {
 ```html
 <template for:each={rows} for:item="row">
   <tr key={row.rowKey}>
-    <!-- ...other cells from references/sdm-table.md... -->
+    <!-- ...other cells from the bound table... -->
     <td>
       <div class="spark-cell" data-row-key={row.rowKey} lwc:dom="manual"></div>
     </td>
@@ -104,7 +105,7 @@ Note the two required attributes on the container:
 
 ## Wiring into the pipeline
 
-Two additions to the `references/sdm-table.md` base:
+Two additions to the `references/sdm-data-binding.md` base:
 
 1. **Query the trend source** — add whichever spec produces the
    numeric series (e.g. a repeated period measure, or a serialized
@@ -128,5 +129,5 @@ disconnect it there.
   extra CSS beyond a fixed width on the `<td>`).
 - `references/d3-in-lwc.md` — the full survival guide; every rule
   there applies here per row.
-- `references/sdm-table.md` — the underlying query pipeline the
+- `references/sdm-data-binding.md` - the underlying query pipeline the
   sparkline attaches to.

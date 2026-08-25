@@ -7,18 +7,28 @@ description: |
   handing back to tableau-next-workshop-lwc for SDK pipeline code generation.
   Triggers when tableau-next-workshop-lwc calls for field discovery, OR when
   the user asks what fields are in the SDM, OR when Vibes is about to write
-  a fetchDataUsingQueryAndSource query but doesn't have field API names yet.
-  Read-only. Do NOT use to create calculated fields or metrics.
+  a hard-coded semantic query but doesn't have field API names yet.
+  Native data-bound LWCs do not require concrete field discovery before
+  generation because the dashboard author maps their semantic roles. Read-only.
+  Do NOT use to create calculated fields or metrics.
 license: Apache-2.0
 metadata:
   author: alaviron
-  version: workshop-3.0
-  api_version: v66.0
+  version: workshop-4.0
+  api_version: v67.0
 ---
 
 # tableau-next-workshop-sdm-discovery
 
 ## Workflow when invoked
+
+First identify the generation mode:
+
+- **Native data-bound LWC (default):** do not discover a concrete model or
+  fields before generation. Hand control back to the LWC skill to define
+  role-oriented `SemanticModel`, `SemanticDimension`, and `SemanticMeasure`
+  properties. Use this skill later only for diagnostics.
+- **Hard-coded/recovery LWC:** follow the live discovery workflow below.
 
 Every value in the hand-off JSON (see Step 8) MUST come from a live REST
 call against the attendee's org in this session. Nothing in this file is a
@@ -35,7 +45,7 @@ substitute for that call.
    "which org are you logged into?", not "what's your org alias?".
 2. **List the org's SDMs.** Run:
    ```
-   sf api request rest /services/data/v66.0/ssot/semantic/models --target-org <username>
+   sf api request rest /services/data/v67.0/ssot/semantic/models --target-org <username>
    ```
    If it fails (non-2xx, empty result), STOP. See "Fail-loud gate" below.
 3. Confirm the SDM choice with the attendee.
@@ -43,7 +53,7 @@ substitute for that call.
    - >1 → present them, ask which.
 4. **Dump the chosen SDM.** Run:
    ```
-   sf api request rest /services/data/v66.0/ssot/semantic/models/<apiName> --target-org <username> > /tmp/sdm.json
+   sf api request rest /services/data/v67.0/ssot/semantic/models/<apiName> --target-org <username> > /tmp/sdm.json
    ```
    If it fails, STOP.
 5. **Extract the field lists you need for mapping.** The raw response is
@@ -108,12 +118,13 @@ to fix org auth, then re-invoke this skill.
    purpose.
 
 2. **`_clc` / `_mtc` fields are model-scoped.** They are NOT addressable
-   as `table_field` inside a specific object. In the wire query, they use
-   `semantic_field: { name }` with **no `table_name`**, and their alias is
-   the bare field name (no dotted prefix).
+   inside a specific object. In `registerFieldsForQuery`, their `model` stays
+   bare. In an explicit structured query, they use
+   `semantic_field: { name }` with **no `table_name`**.
 
-3. **Raw table fields need `table_name`.** In the wire query they use
-   `table_field: { name, table_name }`, alias `${table_name}.${name}`.
+3. **Raw table fields are object-scoped.** In `registerFieldsForQuery`, use
+   `model: "Object.field"`. In an explicit structured query, use
+   `table_field: { name, table_name }`.
 
 4. **Cross-table joins ARE OK when the SDM has a relationship.** Build 1
    of this workshop displays `Account.Account_Name` alongside
@@ -167,10 +178,10 @@ it wrong.**
 
 ```json
 {
-  "sourceName": "<apiName from `sf api request rest /services/data/v66.0/ssot/semantic/models` — do NOT copy from this file>",
+  "sourceName": "<apiName from `sf api request rest /services/data/v67.0/ssot/semantic/models` — do NOT copy from this file>",
   "fields": [
-    { "key": "<local key>",   "role": "dim",     "apiName": "<from /tmp/sdm.json>", "tableName": "<object apiName from /tmp/sdm.json>" },
-    { "key": "<local key>",   "role": "measure", "apiName": "<from /tmp/sdm.json>", "isCalc": true }
+    { "key": "<local key>", "kind": "dimension", "apiName": "<from /tmp/sdm.json>", "tableName": "<object apiName>", "label": "<label>" },
+    { "key": "<local key>", "kind": "calculatedMeasurement", "apiName": "<from /tmp/sdm.json>", "label": "<label>" }
   ],
   "limit": 25
 }
@@ -180,25 +191,28 @@ Rules for populating the JSON:
 
 - `sourceName` = the SDM's `apiName` field from the list-SDMs response.
 - Object-scoped dimension/raw measure → `apiName` + `tableName` (both from
-  `/tmp/sdm.json`'s `semanticDataObjects[]`), `isCalc` omitted.
-- Model-level calc measure (`*_clc`) → `apiName` only, `isCalc: true`,
-  `tableName` omitted.
-- Model-level metric (`*_mtc`) → `apiName` only, `isCalc: true`,
+  `/tmp/sdm.json`'s `semanticDataObjects[]`). Include `label`. For a raw
+  measure, also include its verified `aggregationType`.
+- Model-level calc measure (`*_clc`) → `apiName` only,
+  `kind: "calculatedMeasurement"`, `tableName` omitted.
+- Model-level metric (`*_mtc`) → `apiName` only, `kind: "metric"`,
   `tableName` omitted. Prefer the underlying `_clc` — `_mtc` often fails
   to resolve from LWC extensions.
 
 **Field metadata rule** (HAR-verified against `tmp-df26-workshop`,
 2026-07-10):
 
-| Field kind | `isCalc` | `tableName` | Wire expression | `rowGrouping` |
+| Field kind | `tableName` | Registered-query model | `rowGrouping` | Aggregation |
 |---|---|---|---|---|
-| Object-scoped dimension | omit | required | `table_field: { name, table_name }` | `true` |
-| Object-scoped raw measure | omit | required | `table_field: { name, table_name }` | `false` |
-| Model-level calc measure (`*_clc`) | `true` | omit | `semantic_field: { name }` | `false` |
-| Model-level metric (`*_mtc`) | `true` | omit | `semantic_field: { name }` — prefer the underlying `_clc`; `_mtc` often fails to resolve from LWC extensions | `false` |
+| Object-scoped dimension | required | `Object.field` | `true` | omit |
+| Model-level calculated dimension | omit | bare `apiName` | `true` | omit |
+| Object-scoped raw measure | required | `Object.field` | `false` | verified `aggregationType` required |
+| Model-level calc measure (`*_clc`) | omit | bare `apiName` | `false` | omit |
+| Model-level metric (`*_mtc`) | omit | bare `apiName` | `false` | omit; prefer the underlying `_clc` when available |
 
-**NO `aggregationType` or `semanticAggregationMethod` on any field** —
-aggregation lives in the SDM.
+Do not add `aggregationType` to model-level calculated fields or metrics. Raw
+object-scoped measures do require the verified aggregation for
+`registerFieldsForQuery`.
 
 **Wire-format reminder:** `expression` internals are snake_case
 (`table_field`, `table_name`, `semantic_field`); query-level keys are
@@ -225,15 +239,15 @@ to Total_Sales_mtc", update, re-verify against `/tmp/sdm.json`, re-present.
 
 ## Build-specific field additions
 
-Builds 1, 2, and 3 all use the same set of dimensions + one calc measure
-from the SDM. Do NOT add or remove fields between builds — the LWC
-starter for each next build already expects the shape returned in Step 8.
+In native mode, Builds 1, 2, and 3 preserve inherited property names and types.
+In hard-coded recovery mode, Build 2 preserves Build 1's confirmed query
+contract. Build 3 preserves it and adds the confirmed hidden Account ID
+dimension.
 
-Build 3 also uses a hidden `accountId` in the LWC (for the Log a Call
-URL). That comes from an Opportunity field that IS the Account record ID
-in the SDM (name varies by org — check `/tmp/sdm.json`). The LWC skill's
-Build 3 starter includes the placeholder for it; you do NOT add
-`accountId` to the field spec here unless the starter is missing it.
+Build 3 also uses a hidden `accountId` for the Log a Call URL. Its new native
+bundle adds a required `accountIdField: SemanticDimension` role. Hard-coded
+recovery mode must discover and confirm the ID-carrying field; do not assume
+its API name.
 
 ## Files in this skill
 

@@ -15,7 +15,9 @@ rectangle per industry, tiled with smaller rectangles per account.
 in the workshop template SDM. Attendee prompt shape: *"treemap of
 revenue by industry and account."*
 
-**Do NOT copy this file verbatim.** SDM apiNames come from discovery.
+**Do NOT copy this file verbatim.** Native mode exposes a model, parent
+dimension, child dimension, and amount measure. Use bound labels in legends
+and accessible descriptions. Only hard-coded recovery mode uses discovery.
 
 ## Rules
 
@@ -112,9 +114,9 @@ _renderChart() {
 
 ```javascript
 const specs = [
-    { model: `${OBJ_ACCOUNT}.<industry-dim>`, rowGrouping: true  },
-    { model: `${OBJ_ACCOUNT}.<account-name-dim>`, rowGrouping: true },
-    { model: '<amount-calc-apiName>_clc',       rowGrouping: false }
+    { model: this.parentField.name, rowGrouping: true },
+    { model: this.childField.name, rowGrouping: true },
+    measureSpecFromBinding(this.amountField)
 ];
 // Row shape: [industry, account, amount].
 ```
@@ -134,4 +136,4 @@ const specs = [
 
 - SKILL.md gates: **#7** (registerFieldsForQuery), **#8** (spec order).
 - `references/d3-in-lwc.md` — every rule there applies.
-- `references/sdm-table.md` — same pipeline, different render.
+- `references/sdm-data-binding.md` - default pipeline; `sdm-table.md` is recovery only.

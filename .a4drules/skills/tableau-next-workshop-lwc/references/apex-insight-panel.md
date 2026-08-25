@@ -25,8 +25,9 @@ parameter shape it declares.
   bleed at the iframe boundary. Instead, render *either* the table
   *or* the insight panel (mutually exclusive). See SKILL.md
   "The panel-swap pattern".
-- **Refetch wipes panel state.** When `filterChange` /
-  `parameterChange` fires, close the panel and clear its state —
+- **Refresh or rebinding wipes panel state.** When `filterChange`,
+  `parameterChange`, or any semantic binding changes, close the panel and
+  clear its state —
   otherwise the panel shows an insight for a row that's no longer
   in the current filter context.
 - **Surface Apex errors.** Render `e?.body?.message || e?.message`
@@ -38,8 +39,9 @@ parameter shape it declares.
   the top-right corner of the widget and wins the click. Never put
   an actionable control (e.g. the back button) there — put it at the
   top-**left** of the panel header instead.
-- **Underneath**, the SDM pipeline from `references/sdm-table.md` is
-  unchanged — same specs, same `IDX`, same subscribe-before-register.
+- **Underneath**, preserve the binding contract and controller from
+  `references/sdm-data-binding.md`. The hard-coded recovery path retains the
+  pipeline from `references/sdm-table.md`.
 
 ## Annotated snippet — panel state + click handler
 
@@ -82,11 +84,15 @@ handleModalClose() {
 }
 ```
 
+Call the same reset from the binding controller's `_invalidateFeatureState()`
+before registering a changed signature. Increment the insight request token so
+an older Apex response cannot update a panel after the author remaps data.
+
 ## Template shape (mutually exclusive states)
 
 ```html
 <template lwc:if={showTable}>
-  <!-- the SDM table from references/sdm-table.md, PLUS an Insight
+  <!-- the bound SDM table, PLUS an Insight
        <td> per row: -->
   <!-- <lightning-button-icon icon-name="utility:einstein" variant="brand"
          alternative-text="Insight" title="Generate AI insight"
@@ -96,7 +102,9 @@ handleModalClose() {
 <template lwc:if={modalOpen}>
   <div class="slds-p-around_medium insight-panel">
     <div class="slds-grid slds-p-bottom_small slds-border_bottom">
-      <lightning-button-icon icon-name="utility:back" variant="bare" onclick={handleModalClose}></lightning-button-icon>
+      <lightning-button-icon icon-name="utility:back" variant="bare"
+          alternative-text="Back to opportunities" title="Back to opportunities"
+          onclick={handleModalClose}></lightning-button-icon>
       <h3 class="slds-text-heading_small slds-p-left_small">{modalTitle}</h3>
     </div>
     <div class="slds-p-top_medium">
@@ -121,7 +129,7 @@ Companion CSS — iframe-safe sizing tweaks only:
 .insight-narrative { font-size: 1rem; line-height: 1.5; }
 ```
 
-## Refetch → wipe panel state
+## Refresh or rebinding -> wipe panel state
 
 Inside `_subscribeEvents()`, the `filterChange` / `parameterChange`
 handlers must both (a) enter loading state on the table AND (b) close
@@ -140,6 +148,7 @@ this.sdk.on(SDK_EVENTS.FILTER_CHANGE, () => {
 
 - SKILL.md gates: **#4** (Trust Layer routing), **#5** (no invented
   Apex names), and the panel-swap section.
-- `references/sdm-table.md` — the underlying query pipeline.
+- `references/sdm-data-binding.md` - the default rebinding controller.
+- `references/sdm-table.md` - hard-coded recovery pipeline.
 - `references/salesforce-action-link.md` — Build 3 layers a Log a Call
   button on top of this pattern.
