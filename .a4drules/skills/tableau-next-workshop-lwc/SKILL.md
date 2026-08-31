@@ -11,7 +11,7 @@ description: |
 license: Apache-2.0
 metadata:
   author: alaviron
-  version: workshop-5.0
+  version: workshop-5.1
   fork_of: tableau-next-custom-lwc
   api-version: v67.0
 ---
@@ -22,6 +22,11 @@ Build one prompt-authored extension through three deployable bundles:
 `vibeTable` -> `vibeInsight` -> `vibeAction`. Native Tableau Next data binding
 is the default. Hard-coded fields exist only as an explicit recovery path.
 
+This lifecycle was release-gated with 14 data-binding bundles in
+`26213playground`: automated tests, deployment, and live Tableau Next dashboard
+tests all passed. Treat `references/sdm-data-binding.md` as the validated
+canonical implementation contract.
+
 Do not reuse this workshop fork for production LWC work. Use the canonical
 `tableau-next-custom-lwc` skill from `alaviron/tableau-skills` instead.
 
@@ -30,15 +35,15 @@ Do not reuse this workshop fork for production LWC work. Use the canonical
 Keep the technical framework fixed and derive the business design from the
 attendee's prompt.
 
-| Fixed by this skill | Derived from the prompt |
-|---|---|
-| API version `67.0` and `analytics__Dashboard` | Entity vocabulary and labels |
-| Native semantic property types | Property names and semantic roles |
-| Registered-query and lifecycle mechanics | Visible and hidden fields |
-| Dimensions before measures | Display order, sorting, and formatting |
-| Proxy-row normalization | Insight subject, goal, and payload fields |
-| Three separate bundles | Filters, selections, and Salesforce actions |
-| Accessibility and error behavior | Chart-specific presentation choices |
+| Fixed by this skill                           | Derived from the prompt                     |
+| --------------------------------------------- | ------------------------------------------- |
+| API version `67.0` and `analytics__Dashboard` | Entity vocabulary and labels                |
+| Native semantic property types                | Property names and semantic roles           |
+| Registered-query and lifecycle mechanics      | Visible and hidden fields                   |
+| Dimensions before measures                    | Display order, sorting, and formatting      |
+| Proxy-row normalization                       | Insight subject, goal, and payload fields   |
+| Three separate bundles                        | Filters, selections, and Salesforce actions |
+| Accessibility and error behavior              | Chart-specific presentation choices         |
 
 References are runtime patterns, not business templates. Never carry an
 Opportunity, Account, Stage, Amount, or Log a Call assumption into an unrelated
@@ -68,43 +73,44 @@ not a runtime JSON configuration API. Compile it into concrete metadata,
 
 ```javascript
 const COMPONENT_CONTRACT = {
-    entity: {
-        singularLabel: 'Case',
-        pluralLabel: 'Cases'
+  entity: {
+    singularLabel: "Case",
+    pluralLabel: "Cases",
+  },
+  roles: [
+    {
+      key: "caseNumber",
+      propertyName: "caseNumberField",
+      bindingType: "SemanticDimension",
+      pickerLabel: "Case Number",
+      purpose: "Case number displayed in each row.",
+      required: true,
+      visible: true,
+      valueKind: "text",
+      behaviors: ["rowIdentity", "primaryLabel", "insightContext"],
     },
-    roles: [
-        {
-            key: 'caseNumber',
-            propertyName: 'caseNumberField',
-            bindingType: 'SemanticDimension',
-            pickerLabel: 'Case Number',
-            purpose: 'Case number displayed in each row.',
-            required: true,
-            visible: true,
-            valueKind: 'text',
-            behaviors: ['rowIdentity', 'primaryLabel', 'insightContext']
-        },
-        {
-            key: 'ageDays',
-            propertyName: 'ageDaysField',
-            bindingType: 'SemanticMeasure',
-            pickerLabel: 'Case Age',
-            purpose: 'Case age used for display and sorting.',
-            required: true,
-            visible: true,
-            valueKind: 'number',
-            behaviors: ['primarySort', 'insightContext']
-        }
-    ],
-    displayOrder: ['caseNumber', 'ageDays'],
-    sort: { roleKey: 'ageDays', direction: 'desc', scope: 'returnedRows' },
-    insight: {
-        subjectRoleKey: 'caseNumber',
-        contextRoleKeys: ['caseNumber', 'ageDays'],
-        goal: 'Explain the case status and suggest one supported next action.'
+    {
+      key: "ageDays",
+      propertyName: "ageDaysField",
+      bindingType: "SemanticMeasure",
+      pickerLabel: "Case Age",
+      purpose: "Case age used for display and sorting.",
+      required: true,
+      visible: true,
+      valueKind: "number",
+      behaviors: ["primarySort", "insightContext"],
     },
-    action: null,
-    limit: 25
+  ],
+  displayOrder: ["caseNumber", "ageDays"],
+  sort: { roleKey: "ageDays", direction: "desc", scope: "returnedRows" },
+  insight: {
+    subjectRoleKey: "caseNumber",
+    contextRoleKeys: ["caseNumber", "ageDays"],
+    goal: "Explain the case status and suggest one supported next action.",
+  },
+  action: null,
+  queryLimit: 5000,
+  displayLimit: null,
 };
 ```
 
@@ -130,11 +136,11 @@ first and every measure last, while rendering `displayOrder` exactly.
 Read `references/sdm-data-binding.md` for every data-backed component. The
 dashboard runtime supplies:
 
-| Role type | Metadata type | Runtime value |
-|---|---|---|
-| Semantic model | `SemanticModel` | `{ apiName, id, label }` |
-| Dimension | `SemanticDimension` | `{ name, label }` |
-| Measure | `SemanticMeasure` | `{ name, aggregation, label }` |
+| Role type      | Metadata type       | Runtime value                  |
+| -------------- | ------------------- | ------------------------------ |
+| Semantic model | `SemanticModel`     | `{ apiName, id, label }`       |
+| Dimension      | `SemanticDimension` | `{ name, label }`              |
+| Measure        | `SemanticMeasure`   | `{ name, aggregation, label }` |
 
 Read these objects directly. Do not accept legacy string fallbacks, derive
 labels from API names, or substitute a hard-coded field when a role is missing.
@@ -161,20 +167,25 @@ from a reference.
 
 ## The three builds
 
-| Build | Bundle | Read | Change |
-|---|---|---|---|
-| 1 | `lwc/vibeTable/` | `references/sdm-data-binding.md` | Derive and freeze roles; render the requested table or chart |
-| 2 | `lwc/vibeInsight/` | prior bundle + `references/apex-insight-panel.md` | Preserve the contract; add a prompt-derived per-row insight |
-| 3 | `lwc/vibeAction/` | prior bundle + `references/salesforce-action-link.md` | Preserve the contract; add the requested Salesforce action |
+| Build | Bundle             | Read                                                  | Change                                                       |
+| ----- | ------------------ | ----------------------------------------------------- | ------------------------------------------------------------ |
+| 1     | `lwc/vibeTable/`   | `references/sdm-data-binding.md`                      | Derive and freeze roles; render the requested table or chart |
+| 2     | `lwc/vibeInsight/` | prior bundle + `references/apex-insight-panel.md`     | Preserve the contract; add a prompt-derived per-row insight  |
+| 3     | `lwc/vibeAction/`  | prior bundle + `references/salesforce-action-link.md` | Preserve the contract; add the requested Salesforce action   |
 
 Each build creates a new LWC folder. Do not evolve one bundle in place across
 the three workshop prompts. This gives attendees three independent successful
 deploys and makes previous output the recovery point.
 
+For a later showcase that presents both Build 2 and Build 3 in one component,
+use one `Insights & Actions` view with both row controls. Do not create separate
+tabs whose only difference is the addition of the action control.
+
 ### Build 1: data surface
 
 1. Confirm the role contract, including property names, types, visibility,
-   display order, formatting, row identity, sorting, interactions, and limit.
+   display order, formatting, row identity, sorting, interactions, query limit,
+   and optional display limit.
 2. Scaffold `vibeTable.js`, `vibeTable.html`, and
    `vibeTable.js-meta.xml`; add CSS only for iframe-safe layout needs.
 3. Use class `VibeTable`, master label `Vibe Table`, API `67.0`, and target
@@ -185,13 +196,22 @@ deploys and makes previous output the recovery point.
    positional row contract.
 6. Render columns or marks in the prompt-derived display order using bound
    labels.
-7. Describe a limited, client-sorted result honestly. For example, say "Up to
-   25 returned cases, sorted by displayed age," not "Top 25 cases," unless
-   server-side ordering has been proved.
+7. Keep query and display limits explicit. A null display limit renders every
+   returned row; a numeric display limit applies only after client-side sorting.
+   Describe the result honestly: say "Up to 5,000 returned cases, sorted by
+   displayed age," not "Top cases," unless server-side measure ordering has
+   been proved.
 
 The shared query contract is fixed: subscribe before registration,
 `registerFieldsForQuery` owns fetching, `dataUpdate` is the only data path, and
 filter/parameter handlers never call `fetchData()`.
+
+Use the live-proven one-shot startup contract. Every `@api` setter schedules a
+microtask that attempts startup; the component starts once after it is connected
+and all required mappings exist. Do not synchronize bindings from
+`renderedCallback`, hydrate the source with `getDataSource().getJson()`, build
+binding signatures, or re-register in place. A materially changed mapping
+requires the dashboard runtime to remount the component.
 
 ### Build 2: per-row insight
 
@@ -212,10 +232,10 @@ filter/parameter handlers never call `fetchData()`.
 The expected endpoint is:
 
 ```javascript
-import generateInsight from '@salesforce/apex/RecordInsightGenerator.generateInsight';
+import generateInsight from "@salesforce/apex/RecordInsightGenerator.generateInsight";
 
 const narrative = await generateInsight({
-    rowJson: JSON.stringify(payload)
+  rowJson: JSON.stringify(payload),
 });
 ```
 
@@ -255,11 +275,10 @@ confirmed Account Log a Call action.
 4. Start loading before registration so a synchronous result remains final.
 5. Never call `fetchData()` after registration or from `filterChange` and
    `parameterChange`; the SDK refetches internally.
-6. Support delayed `sdk` and binding assignment. Use the synchronization
-   controller in `sdm-data-binding.md`, not a one-shot `connectedCallback`.
-7. Treat in-place rebinding as experimental. `dataUpdate` carries no query
-   identity, so require a runtime remount unless the live release gate proves
-   cancellation or attribution.
+6. Support delayed `sdk` and binding assignment with setter-scheduled one-shot
+   startup. Never synchronize query state from `renderedCallback`.
+7. Do not implement in-place rebinding. `dataUpdate` carries no query identity,
+   so require a runtime remount for a materially changed mapping.
 8. Emit `init` once per SDK connection and always terminate in `loaded`,
    `nodata`, or `error`.
 9. Use an explicit no-data state and a visible terminal timeout error.
@@ -281,15 +300,15 @@ When the attendee asks for a chart, read `references/d3-in-lwc.md` plus the
 matching chart reference. Use only its layout mechanics and generic semantic
 roles; derive the business design from the prompt.
 
-| Reference | Required semantic roles |
-|---|---|
-| `d3-beeswarm.md` | item dimension, optional category dimension, position measure |
-| `d3-bump.md` | period dimension, entity dimension, ranking measure |
-| `d3-chord.md` | source dimension, target dimension, weight measure |
-| `d3-funnel.md` | ordered step dimension, value measure |
-| `d3-radar.md` | entity dimension and prompt-selected measures |
-| `d3-treemap.md` | parent dimension, child dimension, size measure |
-| `sparkline-column.md` | entity, period, and value; or labelled synthetic demo mode |
+| Reference             | Required semantic roles                                       |
+| --------------------- | ------------------------------------------------------------- |
+| `d3-beeswarm.md`      | item dimension, optional category dimension, position measure |
+| `d3-bump.md`          | period dimension, entity dimension, ranking measure           |
+| `d3-chord.md`         | source dimension, target dimension, weight measure            |
+| `d3-funnel.md`        | ordered step dimension, value measure                         |
+| `d3-radar.md`         | entity dimension and prompt-selected measures                 |
+| `d3-treemap.md`       | parent dimension, child dimension, size measure               |
+| `sparkline-column.md` | entity, period, and value; or labelled synthetic demo mode    |
 
 Do not add filter/selection behavior unless the prompt requests it. If the
 prompt requests interaction, publish against the configured source and role,
@@ -303,14 +322,14 @@ no discovery, and no `@api sdk`.
 Use this only when the attendee asks for the canonical sales scenario or
 explicitly selects the recovery example.
 
-| Role | Property | Type |
-|---|---|---|
+| Role                  | Property             | Type                |
+| --------------------- | -------------------- | ------------------- |
 | Stable opportunity ID | `opportunityIdField` | `SemanticDimension` |
-| Account display name | `accountNameField` | `SemanticDimension` |
-| Opportunity stage | `stageField` | `SemanticDimension` |
-| Close date | `closeDateField` | `SemanticDimension` |
-| Opportunity type | `typeField` | `SemanticDimension` |
-| Amount | `amountField` | `SemanticMeasure` |
+| Account display name  | `accountNameField`   | `SemanticDimension` |
+| Opportunity stage     | `stageField`         | `SemanticDimension` |
+| Close date            | `closeDateField`     | `SemanticDimension` |
+| Opportunity type      | `typeField`          | `SemanticDimension` |
+| Amount                | `amountField`        | `SemanticMeasure`   |
 
 For the canonical Build 3 only, an Account Log a Call action may add hidden
 `accountIdField: SemanticDimension`, validate prefixes `001`, and use
@@ -343,20 +362,20 @@ those locations do not apply to Tableau Next extensions.
 
 ## Troubleshooting
 
-| Symptom | Cause | Fix |
-|---|---|---|
-| Calculated measure query returns an aggregation error | An aggregation was set on a bare calculated measure | Omit `aggregationType`; the model owns it |
-| Field does not exist in table | A model-level field was qualified or a recovery mapping was guessed | Use the confirmed bare model-level name or rerun discovery |
-| Widget enters error during load | `fetchData()` raced the registered query | Remove explicit fetches from registration and filter handlers |
-| Initial rows never arrive | Subscription was installed after registration | Subscribe before `registerFieldsForQuery` |
-| Text or ID contains a numeric measure | A dimension was placed after a measure or role indexes do not match specs | Group all dimensions first and rebuild indexes |
-| Configuration state remains visible | A required semantic role is unmapped | Map every required role; do not add a hard-coded fallback |
-| Old rows appear after remapping | Overlapping registrations cannot be attributed | Require remount; do not advertise live retargeting |
-| Insight returns to a closed or newer panel | Missing request-token invalidation | Apply the complete pattern in `apex-insight-panel.md` |
-| Salesforce action does nothing | Invalid target ID, action name, or rewritten origin | Validate the confirmed action descriptor before opening |
-| Date displays one day early | UTC parsing was used for a date-only value | Construct the local date from year, month, and day parts |
-| Component is absent from the picker | Incorrect metadata target or API version | Use `analytics__Dashboard` and API `67.0` |
-| Deploy validator throws a null property type error | The org retains an old target-property shape | Deploy once without the analytics target, then restore it and deploy again |
+| Symptom                                               | Cause                                                                     | Fix                                                                        |
+| ----------------------------------------------------- | ------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| Calculated measure query returns an aggregation error | An aggregation was set on a bare calculated measure                       | Omit `aggregationType`; the model owns it                                  |
+| Field does not exist in table                         | A model-level field was qualified or a recovery mapping was guessed       | Use the confirmed bare model-level name or rerun discovery                 |
+| Widget enters error during load                       | `fetchData()` raced the registered query                                  | Remove explicit fetches from registration and filter handlers              |
+| Initial rows never arrive                             | Subscription was installed after registration                             | Subscribe before `registerFieldsForQuery`                                  |
+| Text or ID contains a numeric measure                 | A dimension was placed after a measure or role indexes do not match specs | Group all dimensions first and rebuild indexes                             |
+| Configuration state remains visible                   | A required semantic role is unmapped                                      | Map every required role; do not add a hard-coded fallback                  |
+| Old rows appear after remapping                       | Overlapping registrations cannot be attributed                            | Require remount; do not advertise live retargeting                         |
+| Insight returns to a closed or newer panel            | Missing request-token invalidation                                        | Apply the complete pattern in `apex-insight-panel.md`                      |
+| Salesforce action does nothing                        | Invalid target ID, action name, or rewritten origin                       | Validate the confirmed action descriptor before opening                    |
+| Date displays one day early                           | UTC parsing was used for a date-only value                                | Construct the local date from year, month, and day parts                   |
+| Component is absent from the picker                   | Incorrect metadata target or API version                                  | Use `analytics__Dashboard` and API `67.0`                                  |
+| Deploy validator throws a null property type error    | The org retains an old target-property shape                              | Deploy once without the analytics target, then restore it and deploy again |
 
 ## Verification
 
