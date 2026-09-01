@@ -1,7 +1,8 @@
 # tableau-next-workshop-lwc
 
 Fork of `tableau-next-custom-lwc`, narrowed for the DF26 vibe-coding workshop.
-Three builds, one LWC each: `vibeTable` → `vibeInsight` → `vibeAction`.
+
+Three core builds, one LWC each: `vibeTable` -> `vibeInsight` -> `vibeAction`.
 Native Tableau Next data binding is the default; hard-coded SDM fields remain
 available as the basic/recovery path.
 
@@ -47,7 +48,14 @@ signatures, or in-place re-registration to the default pattern. Those
 mechanisms caused a live host-spinner failure in the earlier implementation and
 are unnecessary for the validated contract.
 
+Optional routes cover D3 visualizations, sparklines, local search, Kanban,
+themes, and a media-only video tile. `SKILL.md` routes each request to focused
+references, including D3, video, and test contracts. For every data-backed
+component, `references/sdk-query-lifecycle.md` and
+`references/sdm-data-binding.md` express the same August 31 live-gated
+lifecycle contract.
+
 **Not for production use.** For real Tableau Next LWC work, use the canonical
-`tableau-next-custom-lwc` skill at `alaviron/tableau-skills`.
+`tableau-next-custom-lwc` skill.
 
 See [SKILL.md](SKILL.md) for the full skill spec.

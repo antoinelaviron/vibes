@@ -86,21 +86,23 @@ function isValidSalesforceId(value, expectedPrefixes = []) {
 }
 
 function lightningOrigin(origin) {
-    const rewritten = origin.replace(/--analytics(?=\.)/, '');
     try {
-        const parsed = new URL(rewritten);
-        return parsed.protocol === 'https:' && parsed.hostname.endsWith('.lightning.force.com')
+        const parsed = new URL(origin);
+        parsed.hostname = parsed.hostname.replace(/--analytics(?=\.)/, '');
+        return parsed.protocol === 'https:' &&
+            !parsed.username &&
+            !parsed.password &&
+            !parsed.port &&
+            parsed.hostname.endsWith('.lightning.force.com')
             ? parsed.origin
             : null;
-    } catch (error) {
+    } catch {
         return null;
     }
 }
 
 function actionUrl(contract, origin, recordId) {
-    const base = origin?.endsWith('.lightning.force.com')
-        ? origin
-        : lightningOrigin(origin);
+    const base = lightningOrigin(origin);
     if (!base) return null;
     const encodedRecordId = encodeURIComponent(recordId);
     if (contract.kind === 'recordPage' && contract.targetObjectApiName) {
@@ -164,30 +166,36 @@ interaction. Do not infer popup failure from the `window.open` return value;
 ## Template
 
 ```html
-<thead>
-  <tr>
-    <!-- inherited headers... -->
-    <th scope="col">{actionColumnLabel}</th>
-  </tr>
-</thead>
-<tbody>
-  <!-- Per row, after the inherited data cells: -->
-  <tr>
-    <td class="slds-text-align_center">
-      <lightning-button-icon
-        icon-name={actionIconName}
-        variant="border"
-        alternative-text={row.actionAccessibleLabel}
-        title={row.actionAccessibleLabel}
-        data-record-id={row.actionRecordId}
-        onclick={handleActionClick}
-        disabled={row.actionDisabled}
-      ></lightning-button-icon>
-    </td>
-  </tr>
-</tbody>
-<template lwc:if={actionError}>
-  <p class="slds-text-color_error" role="alert">{actionError}</p>
+<template>
+  <table class="slds-table slds-table_cell-buffer" aria-label={tableAccessibleLabel}>
+    <thead>
+      <tr>
+        <!-- inherited headers... -->
+        <th scope="col">{actionColumnLabel}</th>
+      </tr>
+    </thead>
+    <tbody>
+      <template for:each={rows} for:item="row">
+        <tr key={row.rowKey}>
+          <!-- inherited data cells... -->
+          <td class="slds-text-align_center">
+            <lightning-button-icon
+              icon-name={actionIconName}
+              variant="border"
+              alternative-text={row.actionAccessibleLabel}
+              title={row.actionAccessibleLabel}
+              data-record-id={row.actionRecordId}
+              onclick={handleActionClick}
+              disabled={row.actionDisabled}
+            ></lightning-button-icon>
+          </td>
+        </tr>
+      </template>
+    </tbody>
+  </table>
+  <template lwc:if={actionError}>
+    <p class="slds-text-color_error" role="alert">{actionError}</p>
+  </template>
 </template>
 ```
 

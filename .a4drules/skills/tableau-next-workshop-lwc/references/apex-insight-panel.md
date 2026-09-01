@@ -32,14 +32,17 @@ deploy Apex.
   explicitly makes one relevant to the narrative.
 - Invalidate pending work when the panel closes, another row is selected, data
   refreshes, bindings change, or the component disconnects.
-- Move focus to the Back control after opening and restore it to the triggering
-  row control after closing when that row still exists.
+- Move focus to the Back control after opening and intentionally restore it to
+  the triggering row control after a user-initiated close when that row still
+  exists. If it disappeared, focus a persistent widget target.
 - Put the Back control at top-left; Tableau Next reserves the widget's top-right
   area for platform hover chrome.
-- Render errors and statuses inside the widget. `ShowToastEvent` is silently
-  dropped by dashboard extensions.
+- Render user-safe errors and statuses inside the widget. Log technical details
+  separately; `ShowToastEvent` is silently dropped by dashboard extensions.
 - Use non-empty, prompt-derived accessible labels. Generic "Insight" text alone
   does not identify the affected row.
+- `renderedCallback` may move focus only. It must never start, register,
+  synchronize, or rebind a query.
 
 ## Contract compiled from the prompt
 
@@ -116,8 +119,9 @@ _buildInsightPayload(row) {
 }
 ```
 
-Do not flatten fields into fixed keys such as `Stage` or `Amount`. The semantic
-envelope tells Apex what the row represents while preserving bound labels.
+Do not flatten fields into fixed keys such as `Stage` or `Amount`. The generic
+semantic envelope tells Apex what the row represents while preserving bound
+labels.
 
 ## Complete request-token pattern
 
@@ -142,15 +146,14 @@ async handleInsightClick(event) {
         });
         if (!this._isCurrentInsightRequest(token, rowKey)) return;
         if (!text || text === 'Unable to generate insight. Please retry.') {
-            this.insightError = text || 'No insight generated. Please retry.';
+            this.insightError = text || 'No insight was generated. Please retry.';
         } else {
             this.insightText = text;
         }
     } catch (error) {
         if (!this._isCurrentInsightRequest(token, rowKey)) return;
-        this.insightError = String(
-            error?.body?.message || error?.message || 'Unable to generate insight.'
-        );
+        console.error('[vibeInsight] insight request failed:', error);
+        this.insightError = 'Unable to generate insight. Please retry.';
     } finally {
         if (this._isCurrentInsightRequest(token, rowKey)) {
             this.insightLoading = false;
@@ -182,27 +185,27 @@ _resetInsight({ restoreFocus = false } = {}) {
 }
 
 _invalidateFeatureState() {
-    const restoreFocus = this.insightOpen;
-    this._resetInsight({ restoreFocus });
-    if (!restoreFocus) this._insightTriggerRowKey = null;
+    this._resetInsight();
+    this._insightTriggerRowKey = null;
+    this._focusInsightBack = false;
+    this._restoreInsightTrigger = false;
 }
 ```
 
-Call `_invalidateFeatureState()` before binding registration, on relevant filter
-or parameter refresh, before processing every accepted `dataUpdate`, and during
-disconnect. On disconnect, clear the focus-restoration flags because no target
-remains. Selecting a new row increments the token before the prior request can
-update state.
+Call `_invalidateFeatureState()` before a mapping registration, on relevant
+filter or parameter refresh, before processing every accepted `dataUpdate`, and
+during disconnect. Programmatic invalidation does not restore focus because a
+refresh may remove the trigger. Selecting a new row increments the token before
+the prior request can update state.
 
 ## Focus transfer
 
 ```javascript
 renderedCallback() {
-    this._scheduleBindingSync();
-
     if (this._focusInsightBack && this.insightOpen) {
         this._focusInsightBack = false;
         this.template.querySelector('[data-insight-back]')?.focus();
+        return;
     }
     if (this._restoreInsightTrigger && !this.insightOpen) {
         this._restoreInsightTrigger = false;
@@ -217,8 +220,11 @@ renderedCallback() {
 }
 ```
 
-LWC selector escaping for arbitrary row keys is fragile, so find the matching
-control from `querySelectorAll` instead of interpolating the key into CSS.
+The callback above performs focus work only. Native bindings and hard-coded
+recovery both use private-backed `@api` setters that schedule one-shot query
+startup. LWC selector escaping for arbitrary row keys is fragile, so find the
+matching control from `querySelectorAll` instead of interpolating the key into
+CSS.
 
 ## Template shape
 
@@ -291,8 +297,11 @@ action wording.
 2. Close during generation; the response cannot reopen or update the panel.
 3. Refresh or remap data; the panel closes and pending work is invalidated.
 4. Keyboard activation moves focus to Back after render.
-5. Back restores focus to the triggering row or the data heading if the row
-   disappeared.
-6. Loading and completion use status semantics; errors use alert semantics.
-7. The payload includes only the configured entity, subject, goal, and context
+5. A user-initiated Back restores focus to the triggering row or the persistent
+   widget target if the row disappeared.
+6. Programmatic refresh invalidation does not restore focus to stale row UI.
+7. Loading and completion use status semantics; errors use alert semantics and
+   expose only user-safe text.
+8. The payload includes only the configured entity, subject, goal, and context
    roles and contains no leaked canonical sales fields.
+9. `renderedCallback` contains only focus transfer, never query startup or sync.

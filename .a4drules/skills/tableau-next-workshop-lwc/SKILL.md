@@ -30,6 +30,12 @@ canonical implementation contract.
 Do not reuse this workshop fork for production LWC work. Use the canonical
 `tableau-next-custom-lwc` skill from `alaviron/tableau-skills` instead.
 
+`SKILL.md` is the routing and workshop-gate layer. For every data-backed
+component, `references/sdm-data-binding.md` and
+`references/sdk-query-lifecycle.md` are contract-equivalent statements of the
+August 31 live-gated lifecycle. Feature references add presentation or
+interaction behavior without replacing that lifecycle.
+
 ## Authoring boundary
 
 Keep the technical framework fixed and derive the business design from the
@@ -165,6 +171,23 @@ Never treat the discovery skill's `references/field-mapping-table.md` or a
 worked example as a data source. Never hard-code a source, object, or field
 from a reference.
 
+## Routing
+
+| Request | Starting point | Read before writing code |
+| --- | --- | --- |
+| Build 1: `vibeTable` | New prompt-derived bundle | `sdm-data-binding.md`, `sdk-query-lifecycle.md`, `sdm-table.md` |
+| Build 2: `vibeInsight` | Attendee's deployed `vibeTable` | Core lifecycle references, `apex-insight-panel.md` |
+| Build 3: `vibeAction` | Attendee's deployed `vibeInsight` | Core lifecycle references, `salesforce-action-link.md` |
+| D3 chart route | Purpose-built aggregate visualization when requested | Core lifecycle references, `d3-in-lwc.md`, matching `d3-*.md` |
+| Sparkline route | Preserve the inherited table behavior | Core lifecycle references, `d3-in-lwc.md`, `sparkline-column.md` |
+| Search, Kanban, or theme route | Preserve the inherited `vibeAction` contract | Core lifecycle references, attendee prompt, `test-contract.md` |
+| `vibeVideo` | Independent media tile | `video-player.md`; no SDK query or SDM discovery |
+
+Optional routes are loaded only when requested. Aggregate D3 routes may replace
+the table when the prompt says so; search, Kanban, theme, and sparkline routes
+preserve the inherited prompt-derived roles and behavior. Do not assume an
+Opportunity schema or Account action for any optional route.
+
 ## The three builds
 
 | Build | Bundle             | Read                                                  | Change                                                       |
@@ -281,7 +304,8 @@ confirmed Account Log a Call action.
    so require a runtime remount for a materially changed mapping.
 8. Emit `init` once per SDK connection and always terminate in `loaded`,
    `nodata`, or `error`.
-9. Use an explicit no-data state and a visible terminal timeout error.
+9. Use an explicit no-data state and a visible terminal timeout error after
+   exactly eight seconds (`8000` ms).
 10. Use SLDS utilities and tokens first. Avoid inline styles. Reserve the
     widget's top-right corner for Tableau Next hover chrome.
 11. Use semantic HTML and native Lightning controls. Interactive marks must be
@@ -376,6 +400,8 @@ those locations do not apply to Tableau Next extensions.
 | Date displays one day early                           | UTC parsing was used for a date-only value                                | Construct the local date from year, month, and day parts                   |
 | Component is absent from the picker                   | Incorrect metadata target or API version                                  | Use `analytics__Dashboard` and API `67.0`                                  |
 | Deploy validator throws a null property type error    | The org retains an old target-property shape                              | Deploy once without the analytics target, then restore it and deploy again |
+| D3 chart is empty or disappears                       | D3 readiness, buffering, or visual lifecycle failed                       | Read `d3-in-lwc.md` and the selected chart reference                       |
+| Video tile is blank                                   | URL policy or YouTube CSP configuration rejected the source               | Read `video-player.md`                                                     |
 
 ## Verification
 
@@ -399,8 +425,10 @@ Read `references/test-contract.md` before deployment and
 .a4drules/skills/tableau-next-workshop-lwc/
 |-- SKILL.md
 |-- README.md
+|-- IMPROVEMENTS.md
 `-- references/
     |-- sdm-data-binding.md
+    |-- sdk-query-lifecycle.md
     |-- sdm-table.md
     |-- sdm-helpers.js
     |-- smoke-test-query.md
@@ -424,3 +452,6 @@ Read `references/test-contract.md` before deployment and
 Forked from `tableau-next-custom-lwc` at `alaviron/tableau-skills` (Tableau
 Next tooling team). Wire-format behavior was verified from internal reference
 tooling and live workshop prototypes. This fork remains DF26-specific.
+
+`IMPROVEMENTS.md` is a historical decision record only. It does not override
+`SKILL.md` or the routed references.

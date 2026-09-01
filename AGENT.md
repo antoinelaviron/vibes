@@ -6,7 +6,8 @@
 
 A live workshop repo for Dreamforce 2026 Session 3047: "Vibe-Code Your
 First Tableau Extension." Attendees write Lightning Web Components that
-run as **Tableau Next dashboard extensions**. Nothing else.
+run as **Tableau Next dashboard extensions**. The core path is three builds;
+the optional menu adds focused visualization and media patterns.
 
 ## The two skills that OWN this work
 
@@ -35,10 +36,12 @@ the LWC skill pulls it in when needed.
 FIRST, then act:
 
 - "Tableau Next", "dashboard extension", "extension LWC"
-- "vibeTable", "vibeInsight", "vibeAction"
+- "vibeTable", "vibeInsight", "vibeAction", "vibeChart", "vibeChord",
+  "vibeSparkline", "vibeSearch", "vibeKanban", "vibeTheme", "vibeVideo"
 - "analytics__Dashboard", "semantic model", "SDM"
 - "top opportunities", "Insight button", "Log a Call", "record action"
 - "Build 1", "Build 2", "Build 3"
+- "sparkline", "Kanban", "video tile", "chord diagram", "D3 chart"
 
 ## Landmines to avoid (the skills fix all of these)
 
@@ -48,17 +51,17 @@ FIRST, then act:
   errors. That produces an App Builder page, not a Tableau widget.
 - **Do NOT use `fetchDataUsingQueryAndSource` just because fields are data
   bound** — data binding supplies the source and field roles; it does not
-   require a one-off query. Translate bound properties into
-   `registerFieldsForQuery` specs so dashboard filters and parameters flow
-   into the runtime-owned query. See the LWC skill's "Critical SDK and UI
-   gates" section.
+  require a one-off query. Translate bound properties into
+  `registerFieldsForQuery` specs so dashboard filters and parameters flow
+  into the runtime-owned query. See the LWC skill's "Critical SDK and UI
+  gates" section.
 - **Do NOT call `aiplatform.ModelsAPI` from JavaScript.** Always via an
   `@AuraEnabled` Apex method. `RecordInsightGenerator` is the pre-baked,
   pre-deployed workshop head-start class; attendees call it but do not build or
   modify it. Trust Layer routing is mandatory.
 - **Do NOT use `NavigationMixin`** for Salesforce navigation from within
   the extension — it silently fails inside `*--analytics.<domain>`. Use
-  `window.open` with an origin-rewritten URL.
+  `window.open` with a validated, origin-rewritten URL.
 
 If you're about to reach for any of the above because "that's how
 Lightning normally works" — STOP and read the skill instead. The skill
@@ -83,6 +86,16 @@ was written after the workshop team hit each of these traps.
 - **Binding compatibility**: property names and types are persisted in
   dashboards. Never rename, remove, or repurpose a shipped binding property;
   add a new optional property or a new component bundle instead.
+- **Canonical knowledge**: `SKILL.md` routes the work. Read
+  `references/sdm-data-binding.md` and `references/sdk-query-lifecycle.md` for
+  every data-backed component, then load the feature-specific reference. The
+  two lifecycle references encode the same August 31 live-gated contract. Do
+  not treat `IMPROVEMENTS.md` as a second source of implementation code.
+- **SDK startup**: use setter-scheduled one-shot startup from private-backed
+  `@api` accessors plus `connectedCallback`. Never initiate or synchronize a
+  query from `renderedCallback`; never hydrate with `getDataSource/getJson`,
+  compute binding signatures, or rebind in place. Remount after a material
+  mapping change.
 
 ## Attendee UX rule
 

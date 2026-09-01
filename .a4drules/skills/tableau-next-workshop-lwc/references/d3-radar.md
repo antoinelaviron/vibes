@@ -75,10 +75,18 @@ polygon shape alone is not an equivalent representation of multiple measures.
 ```javascript
 const specs = [
     { model: this.entityField.name, rowGrouping: true },
-    ...RADAR_AXES.map((axis) => measureSpecFromBinding(this[axis.propertyName]))
+    ...RADAR_AXES.map((axis) =>
+        measureSpecFromBinding(
+            this[axis.propertyName],
+            axis.allowedAggregations
+        )
+    )
 ];
 // Row contract: [entity, ...axisValues].
 ```
+
+Compile an `allowedAggregations` list into each generated axis descriptor so
+its aggregation remains compatible with that axis's units and formatter.
 
 ## Verification
 

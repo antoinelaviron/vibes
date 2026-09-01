@@ -381,9 +381,19 @@ connectedCallback() {
 disconnectedCallback() {
     this._connected = false;
     this._started = false;
+    this.rows = [];
+    this._orderedRoles = [];
+    this._indexByRole = {};
+    this._labelsByRole = {};
+    this._isLoading = false;
+    this._hasData = false;
+    this._hasNoData = false;
+    this._hasError = false;
+    this._errorMessage = '';
     this._unsubscribes.forEach((unsubscribe) => unsubscribe?.());
     this._unsubscribes = [];
     clearTimeout(this._loadingTimer);
+    this._loadingTimer = null;
     this._invalidateFeatureState();
 }
 
@@ -415,18 +425,23 @@ _tryStart() {
     if (this._started || !this._connected || !this.sdk) return;
 
     const sourceName = this.sdmName?.apiName;
-    const bindings = ROLE_DEFINITIONS.map(
-        (role) => this[role.propertyName]
+    const activeRoles = ROLE_DEFINITIONS.map((role) => ({
+        ...role,
+        binding: this[role.propertyName]
+    }));
+    const missingRequiredRole = activeRoles.some(
+        (role) => role.required && !role.binding?.name
     );
-    if (!sourceName || bindings.some((binding) => !binding?.name)) {
+    if (!sourceName || missingRequiredRole) {
         this._showConfigurationMessage();
         return;
     }
+    const mappedRoles = activeRoles.filter((role) => role.binding?.name);
 
     this._started = true;
     this._setLoadingState();
     try {
-        const specs = this._buildQuerySpecs();
+        const specs = this._buildQuerySpecs(mappedRoles);
         this.sdk.registerDataSource(sourceName);
         this._unsubscribes = [
             this.sdk.on('dataUpdate', (payload) =>
@@ -447,6 +462,9 @@ _tryStart() {
     }
 }
 ```
+
+Build ordered roles, indexes, labels, and specs only from `mappedRoles`.
+Unmapped optional roles neither block startup nor occupy a returned-row index.
 
 `registerFieldsForQuery` fetches internally and emits `dataUpdate`. Subscribe
 before the first registration. Never call `fetchData()` immediately after it.

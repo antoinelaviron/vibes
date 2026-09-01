@@ -50,6 +50,8 @@ universal default.
 - Keep the SVG compact and decorative. Put its complete meaning in adjacent
   per-row assistive text. In synthetic mode, also render the required disclosure
   visibly in the column header or caption.
+- Place the concise assistive summary immediately before the decorative
+  sparkline in the same table cell so reading order matches visual placement.
 - Do not add axes or hover-only tooltips. If more detail is needed, use a full
   chart.
 
@@ -115,12 +117,13 @@ _drawSparkline(container, values) {
 <th scope="col">{trendColumnLabel}</th>
 <!-- Per row: -->
 <td>
+  <span class="slds-assistive-text">{row.trendAccessibleSummary}</span>
   <div
     class="spark-cell"
     data-row-key={row.rowKey}
     lwc:dom="manual"
+    aria-hidden="true"
   ></div>
-  <span class="slds-assistive-text">{row.trendAccessibleSummary}</span>
 </td>
 ```
 

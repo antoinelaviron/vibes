@@ -70,16 +70,28 @@ const series = selectedEntities.map((entity) => ({
 Use prompt/binding labels for the period axis, series names, chart title, SVG
 title/description, and assistive summaries.
 
+When the prompt requests a parameterized period grain or entity count, verify
+with uneven participation rather than a complete rectangle. For example,
+`Alpha` can have values in P1 and P3, `Beta` in P1, P2, and P3, and `Gamma`
+only in P2. Changing the parameter must recompute the bounded entity set and
+period ranks from the returned rows; absent combinations remain `null`.
+
 ## Query shape
 
 ```javascript
 const specs = [
     { model: this.periodField.name, rowGrouping: true },
     { model: this.entityField.name, rowGrouping: true },
-    measureSpecFromBinding(this.rankingValueField)
+    measureSpecFromBinding(
+        this.rankingValueField,
+        RANKING_VALUE_ALLOWED_AGGREGATIONS
+    )
 ];
 // Row contract: [period, entity, rankingValue].
 ```
+
+Generate `RANKING_VALUE_ALLOWED_AGGREGATIONS` from the confirmed ranking value
+and formatter; do not accept count semantics for a role presented as currency.
 
 ## Verification
 
@@ -89,6 +101,8 @@ const specs = [
 - Ties use a deterministic prompt-confirmed secondary order.
 - Labels and summaries use bound field language.
 - Bounded result text does not claim a global top-N.
+- Parameter changes preserve unequal participation and recompute missing-period
+  gaps instead of reusing stale ranks.
 
 ## DF26 worked example
 

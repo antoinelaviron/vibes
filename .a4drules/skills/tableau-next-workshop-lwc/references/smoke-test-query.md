@@ -1,9 +1,11 @@
 # Smoke-test a prompt-derived semantic query
 
-Use the `tableau-semantic-query-api` skill to translate the confirmed role
-mapping into a `structuredSemanticQuery`, then run its gateway script. For
-hard-coded recovery, do this before LWC generation. For native binding, do it
-after the dashboard author maps every semantic role.
+Smoke-test every new data-backed query before generating its LWC. Use the
+`tableau-semantic-query-api` skill to translate the confirmed role mapping into
+a `structuredSemanticQuery`, then run its gateway script. For hard-coded
+recovery, do this before LWC generation. For native binding, do it after the
+dashboard author maps every semantic role. The smoke test validates field shape;
+it does not prove equivalent server-side ordering in `registerFieldsForQuery`.
 
 ## Contents
 
@@ -15,7 +17,7 @@ after the dashboard author maps every semantic role.
 
 ## Role handoff
 
-Start from the same canonical handoff consumed by the recovery LWC:
+Start from the same canonical handoff consumed by the LWC:
 
 ```json
 {
@@ -32,7 +34,7 @@ Start from the same canonical handoff consumed by the recovery LWC:
       "key": "ageDays",
       "kind": "measure",
       "model": "Object.Verified_Age",
-      "aggregationType": "Max",
+      "aggregationType": "MAX",
       "visible": true
     }
   ],
@@ -42,7 +44,8 @@ Start from the same canonical handoff consumed by the recovery LWC:
 }
 ```
 
-The values show structure only. Use the live mapped model and fields.
+The values show structure only. Use the live mapped model and fields. Do not
+auto-pick a substitute or continue with an unresolved field.
 
 ## Translate roles to gateway fields
 
@@ -92,7 +95,26 @@ Write a temporary query file shaped like:
 ```
 
 Use the exact query schema produced by `tableau-semantic-query-api`; the block
-above illustrates role translation and is not a field source.
+above illustrates role translation and is not a field source. For raw
+object-scoped measures, use the matching verified aggregation. For model-level
+`_clc` and `_mtc` fields, keep the field bare and apply the gateway semantic
+aggregation described above.
+
+The equivalent LWC handoff remains dimensions first and uses the SDK's uppercase
+aggregation value:
+
+```javascript
+const specs = [
+    { model: 'Object.Verified_Number', rowGrouping: true },
+    {
+        model: 'Object.Verified_Age',
+        rowGrouping: false,
+        aggregationType: 'MAX'
+    }
+];
+
+sdk.registerFieldsForQuery(specs, sourceName, { limit: 25 });
+```
 
 ## Run the smoke script
 
@@ -101,7 +123,7 @@ above illustrates role translation and is not a field source.
   <org-alias> <sdm-api-name> /tmp/query.json
 ```
 
-The script expects the query file to contain the
+The gateway script expects the query file to contain the
 `structuredSemanticQuery` body and resolves the model ID itself.
 
 ## Preflight checks
@@ -112,7 +134,7 @@ The script expects the query file to contain the
 4. Qualified raw measures include the confirmed aggregation.
 5. Bare calculated measurements omit aggregation in the LWC spec but translate
    to gateway `USER_AGG`.
-6. The query limit matches the generated component.
+6. The query limit matches the generated component's `{ limit }` registration.
 7. Expected returned column count equals role count.
 8. The identity role or deterministic composite is present.
 9. An action target is a dimension and does not change the intended row grain.
@@ -127,6 +149,11 @@ HTTP 201 proves that the source and field query is accepted. Also verify:
 - Salesforce action values are string IDs and match a confirmed prefix only
   when the target object has one.
 - When Build 3 adds an action target, row count and grouping match Build 2.
+
+On a validation error, rerun discovery for invalid fields, verify qualified raw
+field names and aggregations, and keep model-level calculated fields bare. On an
+authentication or permission error, refresh the org token or treat the missing
+Data Cloud permission as an org configuration issue.
 
 Gateway success does not prove dashboard filters flow into
 `registerFieldsForQuery`. Apply one relevant external filter separately in the

@@ -23,7 +23,7 @@ them.
 
 **SDK spec:**
 ```javascript
-{ model: 'Opportunity.Probability', rowGrouping: false, aggregationType: 'Sum' }
+{ model: 'Opportunity.Probability', rowGrouping: false, aggregationType: 'SUM' }
 ```
 
 **Semantic Query field:**

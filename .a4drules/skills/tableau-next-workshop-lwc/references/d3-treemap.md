@@ -70,10 +70,13 @@ make imperative rectangles pointer-only controls.
 const specs = [
     { model: this.parentField.name, rowGrouping: true },
     { model: this.childField.name, rowGrouping: true },
-    measureSpecFromBinding(this.sizeField)
+    measureSpecFromBinding(this.sizeField, SIZE_ALLOWED_AGGREGATIONS)
 ];
 // Row contract: [parent, child, size].
 ```
+
+Generate `SIZE_ALLOWED_AGGREGATIONS` from the confirmed size semantics and
+formatter; reject aggregations that would make area encoding misleading.
 
 ## Verification
 

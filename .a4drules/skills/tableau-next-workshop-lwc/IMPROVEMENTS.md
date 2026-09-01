@@ -2,20 +2,28 @@
 
 ## Purpose
 
-This memo records corrections discovered while implementing and deploying all
-three core builds plus the seven extension-menu examples against
-`26213playground`. It is intended to improve the workshop skill and its
-references, not to change the workshop's teaching goals.
+This memo records historical findings from implementing and deploying all three
+core builds plus the seven extension-menu examples against `26213playground`.
+It is a decision record, not implementation authority. The August 31, 2026 live
+gate superseded the hydration, rendered-start, signature, and in-place rebinding
+recommendations below. Follow `SKILL.md`, `references/sdm-data-binding.md`, and
+the contract-equivalent `references/sdk-query-lifecycle.md` instead.
 
-The most important change is to preserve the required SDK ordering while
-treating source hydration as optional and bounded. A pending hydration promise
-must never prevent the dashboard query or its timeout from starting.
+The authoritative default uses native prompt-derived semantic bindings, API
+67.0, setter-scheduled one-shot startup from every `@api` accessor plus
+`connectedCallback`, no query initiation or synchronization from
+`renderedCallback`, no `getDataSource/getJson` hydration, and remounts for
+material mapping changes. Historical snippets remain only to explain prior
+failures and must not be copied into generated components.
 
 ## Highest-Priority Corrections
 
-### 1. Bound optional source hydration
+### 1. Historical proposal: bound optional source hydration
 
-**Current guidance**
+**Superseded by the August 31 live gate.** Do not hydrate in the native-binding
+startup path. The validated lifecycle has no `getDataSource/getJson` call.
+
+**Historical context**
 
 `SKILL.md` and `references/sdm-table.md` make `getDataSource()` blocking. The
 canonical snippets invoke `getJson()` after it, but do not consistently await
@@ -37,7 +45,7 @@ its fields, or starts its loading timeout. An unobserved `getJson()` rejection
 can also become an unhandled promise failure. The dashboard tile remains on its
 initial spinner indefinitely in the first case.
 
-**Correction**
+**Historical recommendation (superseded; do not implement)**
 
 Keep the semantic ordering, but make hydration a short best-effort warmup.
 Use a timeout race and continue after timeout or rejection:
@@ -63,7 +71,7 @@ async _hydrateSource(sourceName, generation) {
 }
 ```
 
-The canonical pipeline should become:
+At the time, the proposed pipeline was:
 
 ```text
 1. registerDataSource(sourceName)
@@ -124,6 +132,10 @@ _setLoadingState() {
 
 ### 3. Make lifecycle and reconnect behavior part of the base pattern
 
+**Partially superseded by the August 31 live gate.** Keep disconnect cleanup,
+but use setter-scheduled one-shot startup rather than `renderedCallback`,
+hydration, binding signatures, or in-place registration generations.
+
 **Observed failure**
 
 The original reference unsubscribed in `disconnectedCallback()` but retained
@@ -131,7 +143,7 @@ The original reference unsubscribed in `disconnectedCallback()` but retained
 never subscribed or queried again. Pending SDK/D3 promises could also mutate a
 detached component.
 
-**Correction**
+**Historical recommendation (partially superseded)**
 
 The canonical scaffold should include connected state and a monotonically
 increasing pipeline generation. Every asynchronous continuation checks both.
@@ -166,7 +178,11 @@ also clear data buffered for the prior connection generation.
 
 ### 4. Make filter relevance explicit
 
-**Current guidance**
+**Superseded by the August 31 live gate.** Registered-query refresh arrives
+through `dataUpdate`. Do not add this filter-relevance loading path to the base
+lifecycle.
+
+**Historical context**
 
 The current canonical handler sets loading for every `filterChange`.
 
@@ -479,15 +495,15 @@ try {
 The actual generated exception type should remain the one supplied by the
 target org's Models API classes.
 
-## Test Contract to Add to the Skill
+## Implemented Test Contract
 
-The skill currently gives useful query smoke-test guidance, but it should make
-the following regression cases mandatory for generated components:
+These regression cases were carried into `references/test-contract.md`; that
+reference is authoritative:
 
 | Area            | Required test or validation                                                                     |
 | --------------- | ----------------------------------------------------------------------------------------------- |
-| SDK startup     | Delayed SDK injection starts exactly once.                                                      |
-| Hydration       | Never-settling `getDataSource/getJson` does not block query registration.                       |
+| SDK startup     | Delayed SDK and role assignments converge through setters on exactly one registration.           |
+| Hydration       | Native startup contains no `getDataSource/getJson` hydration path.                              |
 | Registration    | Synchronous `dataUpdate` during registration remains the final state.                           |
 | Initial failure | Missing initial `dataUpdate` reaches user-visible terminal error.                               |
 | Reconnect       | Disconnect/reconnect subscribes and queries again without stale rows.                           |
@@ -503,10 +519,12 @@ the following regression cases mandatory for generated components:
 | Apex            | Expected connector and unexpected invocation failures produce the same user-safe fallback.      |
 | Bounded data    | Any limited query visibly states its result-set bound and avoids global top-N claims.           |
 
-## Suggested Reference Organization
+## Historical Suggested Reference Organization
 
-Add these shared references rather than repeating fragile lifecycle code in
-every build:
+This proposed split is superseded. The current shared authorities are
+`references/sdm-data-binding.md` and the contract-equivalent
+`references/sdk-query-lifecycle.md`; do not create or route to the proposed
+hydration-era lifecycle file below.
 
 ```text
 references/
@@ -517,24 +535,26 @@ references/
   test-contract.md
 ```
 
-`sdm-table.md` should become the compact teaching introduction and link to the
-hardened lifecycle reference for production-quality generated code.
+The historical proposal above is not current structure.
 
 ## Intentional Workshop Tradeoffs to Preserve
 
 These are not defects if labelled clearly:
 
-- Hard-coded SDM source and fields after live discovery.
+- Hard-coded SDM source and fields only in explicitly selected recovery mode
+  after live discovery.
 - Explicit query and display limits; the validated table-derived examples query
   up to 5,000 rows and render every returned row.
 - Client-side sort of the returned set, provided it is not called global top-N.
 - A deterministic synthetic sparkline, provided it is visibly described as a
   demo rather than historical data.
 - Pure `vibeVideo` media tile with no Tableau SDK query.
-- API version 60.0 if it is a deliberate compatibility baseline; document why
-  it differs from the project source API.
+- API version 67.0 for workshop dashboard-extension bundles.
 
-## Recommended Editing Order
+## Historical Recommended Editing Order
+
+This sequence is retained only as context for the original remediation. It is
+not an open implementation plan.
 
 1. Correct the canonical SDK pipeline and table reference first.
 2. Update Build 2 Insight and Build 3 action references for stale async work,
@@ -551,7 +571,7 @@ the findings useful without creating a competing source of canonical code:
 
 | Recommendations | Disposition                                                                                                   | Canonical destination                                            |
 | --------------- | ------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| 1-3             | Superseded by the live-proven one-shot lifecycle                                                              | `references/sdm-data-binding.md`                                 |
+| 1-3             | Superseded by the August 31 live-proven one-shot lifecycle; no hydration or rendered query startup          | `references/sdm-data-binding.md`, `references/sdk-query-lifecycle.md` |
 | 4               | Removed from the canonical path; registered-query refresh arrives through `dataUpdate`                        | `references/sdm-data-binding.md`                                 |
 | 5-6             | Applied                                                                                                       | `references/sdm-table.md`, `references/smoke-test-query.md`      |
 | 7-8             | Applied                                                                                                       | `references/apex-insight-panel.md`                               |
@@ -564,4 +584,6 @@ the findings useful without creating a competing source of canonical code:
 | 18              | Applied to the pre-baked Apex asset                                                                           | `force-app/main/default/classes/OpportunityInsightGenerator.cls` |
 
 `SKILL.md` remains the routing and critical-gate layer. This memo is a historical
-decision record, not an additional implementation reference.
+decision record, not an additional implementation reference. Where any earlier
+section conflicts with the implementation disposition or the August 31 live
+gate, the live-gated references win.

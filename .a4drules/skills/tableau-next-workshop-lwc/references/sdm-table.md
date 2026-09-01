@@ -11,6 +11,8 @@ discovery.
 - [Query rules](#query-rules)
 - [Compile the confirmed roles](#compile-the-confirmed-roles)
 - [Recovery pipeline](#recovery-pipeline)
+- [Date-only values](#date-only-values)
+- [Template states and result copy](#template-states-and-result-copy)
 - [Verification](#verification)
 
 ## Required handoff
@@ -45,7 +47,7 @@ the attendee confirms a handoff shaped like this:
       "key": "score",
       "kind": "measure",
       "model": "Object.Verified_Measure",
-      "aggregationType": "Sum",
+      "aggregationType": "SUM",
       "label": "Score",
       "visible": true,
       "valueKind": "number",
@@ -58,7 +60,9 @@ the attendee confirms a handoff shaped like this:
 
 This example describes the handoff structure, not fields to copy. Every source,
 role, model string, aggregation, label, visibility decision, and ordering value
-must come from the confirmed prompt and live discovery.
+must come from the confirmed prompt and live discovery. Keep strict model-field
+validation: do not auto-pick fields and do not silently accept an unresolved or
+unknown model string.
 
 ## Query rules
 
@@ -66,17 +70,23 @@ must come from the confirmed prompt and live discovery.
   may emit `dataUpdate` synchronously.
 - Use `registerFieldsForQuery`, not `fetchDataUsingQueryAndSource`, so dashboard
   filters and parameters remain runtime-owned.
+- Call registration with the options object `{ limit: QUERY_LIMIT }`.
 - Order every dimension before every measure. Interleaving silently changes
   returned column positions.
-- Use bare model names for model-level calculated dimensions, measurements, and
-  metrics. Omit `aggregationType` for bare calculated measures.
-- Include a verified aggregation for a qualified raw measure.
-- Treat `dataUpdate` as the only row input. Filter and parameter handlers only
-  update UI state.
+- Use bare model names for verified model-level calculated dimensions,
+  measurements, and metrics. Omit `aggregationType` for bare calculated
+  measures.
+- For qualified raw measures, use only supported uppercase SDK values:
+  `SUM`, `AVG`, `MIN`, `MAX`, `MEDIAN`, `COUNT`, `COUNT_DISTINCT`, `STDDEV`,
+  `VAR`, `VARP`, and `USER_AGG`, restricted to values supported by the role.
+- Treat `dataUpdate` as the only row input. Accept direct rows and the wrappers
+  `{ rows }` and `{ data }`. Filter and parameter handlers only update UI state.
 - Read positional array-like Proxy rows through role indexes. Do not depend on
   `Array.isArray(row)`.
 - Build a stable row key from the confirmed identity role or deterministic
   composite, never from an index alone.
+- Do not hydrate through `getDataSource` or `getJson`.
+- Do not start or synchronize a query from `renderedCallback`.
 
 ## Compile the confirmed roles
 
@@ -106,7 +116,8 @@ const ROLE_DEFINITIONS = [
         key: '<measure-role-key>',
         kind: 'measure',
         model: '<verified-qualified-or-bare-measure>',
-        aggregationType: '<verified-aggregation>',
+        aggregationType: '<verified-uppercase-sdk-aggregation>',
+        allowedAggregations: ['<prompt-compatible-uppercase-aggregation>'],
         visible: true,
         valueKind: 'number'
     }
@@ -116,6 +127,11 @@ const ROLE_DEFINITIONS = [
 Compile role order, specs, and indexes from the same array so they cannot drift:
 
 ```javascript
+const SDK_AGGREGATIONS = new Set([
+    'SUM', 'AVG', 'MIN', 'MAX', 'MEDIAN', 'COUNT', 'COUNT_DISTINCT',
+    'STDDEV', 'VAR', 'VARP', 'USER_AGG'
+]);
+
 function compileQuery(roleDefinitions) {
     const dimensions = roleDefinitions.filter((role) => role.kind === 'dimension');
     const measures = roleDefinitions.filter((role) => role.kind === 'measure');
@@ -126,8 +142,11 @@ function compileQuery(roleDefinitions) {
         }
         const spec = { model: role.model, rowGrouping: false };
         if (!role.model.includes('.')) return spec;
-        if (!role.aggregationType) {
-            throw new Error(`Missing aggregation for ${role.key}`);
+        if (
+            !SDK_AGGREGATIONS.has(role.aggregationType) ||
+            !role.allowedAggregations?.includes(role.aggregationType)
+        ) {
+            throw new Error(`Unsupported aggregation for ${role.key}.`);
         }
         return { ...spec, aggregationType: role.aggregationType };
     });
@@ -136,12 +155,26 @@ function compileQuery(roleDefinitions) {
     );
     return { orderedRoles, specs, indexByRole };
 }
+
+function eventRows(payload) {
+    if (payload && typeof payload === 'object') {
+        if (payload.rows !== undefined) return payload.rows;
+        if (payload.data !== undefined) return payload.data;
+    }
+    return payload;
+}
 ```
 
 This removes the failure mode where a hand-written six-entry index map is used
-with a three-field query.
+with a three-field query. Generate each measure's `allowedAggregations` from its
+confirmed units and formatter; the global set validates SDK syntax but does not
+replace role-specific semantic validation.
 
 ## Recovery pipeline
+
+Recovery still receives `sdk` through a private-backed `@api` accessor. The
+setter schedules the same one-shot startup used by native bindings, so delayed
+SDK assignment does not require render-driven polling.
 
 ```javascript
 import { LightningElement, api, track } from 'lwc';
@@ -156,53 +189,70 @@ const LIFE_CYCLE = {
 };
 
 export default class VibeTable extends LightningElement {
-    @api sdk;
     @track rows = [];
     @track _isLoading = true;
     @track _hasError = false;
     @track _hasNoData = false;
     @track _errorMessage = '';
 
+    _sdk;
     _connected = false;
-    _pipelineStarted = false;
+    _started = false;
+    _startScheduled = false;
     _pipelineGeneration = 0;
     _isQueryRegistered = false;
     _unsubscribes = [];
     _loadingTimer;
 
-    connectedCallback() {
-        this._connected = true;
-        this._tryStartPipeline();
+    @api
+    get sdk() {
+        return this._sdk;
     }
 
-    renderedCallback() {
-        this._tryStartPipeline();
+    set sdk(value) {
+        this._sdk = value;
+        this._scheduleStart();
+    }
+
+    connectedCallback() {
+        this._connected = true;
+        this._scheduleStart();
     }
 
     disconnectedCallback() {
         this._connected = false;
         this._pipelineGeneration += 1;
-        this._pipelineStarted = false;
+        this._started = false;
         this._isQueryRegistered = false;
         this._unsubscribes.forEach((unsubscribe) => unsubscribe?.());
         this._unsubscribes = [];
         clearTimeout(this._loadingTimer);
     }
 
-    _tryStartPipeline() {
-        if (this._pipelineStarted || !this._connected || !this.sdk) return;
-        this._pipelineStarted = true;
+    _scheduleStart() {
+        if (this._startScheduled) return;
+        this._startScheduled = true;
+        Promise.resolve().then(() => {
+            this._startScheduled = false;
+            this._tryStart();
+        });
+    }
+
+    _tryStart() {
+        if (this._started || !this._connected || !this.sdk) return;
+        this._started = true;
         const generation = ++this._pipelineGeneration;
         this._runPipeline(generation);
     }
 
     _runPipeline(generation) {
         try {
-            this.sdk.actions?.notifyLifecycleChange?.(LIFE_CYCLE.INIT);
             const query = compileQuery(ROLE_DEFINITIONS);
             this._orderedRoles = query.orderedRoles;
             this._indexByRole = query.indexByRole;
+            this.sdk.registerDataSource(SOURCE_NAME);
             this._subscribeEvents(generation);
+            this.sdk.actions?.notifyLifecycleChange?.(LIFE_CYCLE.INIT);
             this._setLoadingState(generation);
             this._isQueryRegistered = true;
             this.sdk.registerFieldsForQuery(query.specs, SOURCE_NAME, {
@@ -210,15 +260,16 @@ export default class VibeTable extends LightningElement {
             });
         } catch (error) {
             if (!this._isCurrentPipeline(generation)) return;
-            this._showError(String(error?.message || error));
+            this._isQueryRegistered = false;
+            this._showError('Unable to load data. Please retry.', error);
         }
     }
 
     _subscribeEvents(generation) {
         if (typeof this.sdk.on !== 'function') return;
         this._unsubscribes = [
-            this.sdk.on(SDK_EVENTS.DATA_UPDATE, (rows) => {
-                if (this._isCurrentPipeline(generation)) this._processRows(rows);
+            this.sdk.on(SDK_EVENTS.DATA_UPDATE, (payload) => {
+                if (this._isCurrentPipeline(generation)) this._processRows(payload);
             }),
             this.sdk.on(SDK_EVENTS.FILTER_CHANGE, (payload) => {
                 if (
@@ -241,29 +292,36 @@ export default class VibeTable extends LightningElement {
         return this._connected && generation === this._pipelineGeneration;
     }
 
-    _processRows(rawRows) {
+    _processRows(payload) {
         clearTimeout(this._loadingTimer);
-        if (rawRows === undefined) {
+        const rawRows = eventRows(payload);
+        if (rawRows == null) {
             this._isQueryRegistered = false;
             this._showError('Unable to load data. Please retry.');
             return;
         }
-        const length = typeof rawRows?.length === 'number' ? rawRows.length : 0;
-        const mapped = [];
-        for (let rowIndex = 0; rowIndex < length; rowIndex += 1) {
-            const rawRow = rawRows[rowIndex];
-            if (!rawRow) continue;
-            const values = {};
-            for (const role of this._orderedRoles) {
-                values[role.key] = rawRow[this._indexByRole[role.key]] ?? null;
+        try {
+            const length = typeof rawRows.length === 'number' ? rawRows.length : 0;
+            const mapped = [];
+            for (let rowIndex = 0; rowIndex < length; rowIndex += 1) {
+                const rawRow = rawRows[rowIndex];
+                if (!rawRow) continue;
+                const values = {};
+                for (const role of this._orderedRoles) {
+                    values[role.key] = rawRow[this._indexByRole[role.key]] ?? null;
+                }
+                mapped.push({
+                    rowKey: this._buildStableRowKey(values),
+                    values,
+                    displayValues: this._formatRoleValues(values)
+                });
             }
-            mapped.push({
-                rowKey: this._buildStableRowKey(values, rowIndex),
-                values,
-                displayValues: this._formatRoleValues(values)
-            });
+            this.rows = this._sortReturnedRows(mapped);
+        } catch (error) {
+            this._isQueryRegistered = false;
+            this._showError('Unable to display the returned data. Please retry.', error);
+            return;
         }
-        this.rows = this._sortReturnedRows(mapped);
         this._isLoading = false;
         this._hasError = false;
         this._hasNoData = this.rows.length === 0;
@@ -285,8 +343,9 @@ export default class VibeTable extends LightningElement {
         }, LOADING_SAFETY_MS);
     }
 
-    _showError(message) {
+    _showError(message, error) {
         clearTimeout(this._loadingTimer);
+        if (error) console.error('[vibeTable] data query failed:', error);
         this._isLoading = false;
         this._hasNoData = false;
         this._hasError = true;
@@ -311,11 +370,19 @@ export default class VibeTable extends LightningElement {
         return models;
     }
 
-    _buildStableRowKey(values, rowIndex) {
-        const identity = IDENTITY_ROLE_KEY
-            ? values[IDENTITY_ROLE_KEY]
-            : COMPOSITE_IDENTITY_ROLE_KEYS.map((key) => values[key]).join('|');
-        return `row-${rowIndex}-${String(identity ?? '')}`;
+    _buildStableRowKey(values) {
+        const identityParts = IDENTITY_ROLE_KEY
+            ? [values[IDENTITY_ROLE_KEY]]
+            : COMPOSITE_IDENTITY_ROLE_KEYS.map((key) => values[key]);
+        if (
+            identityParts.length === 0
+            || identityParts.every(
+                (value) => value === null || value === undefined || String(value) === ''
+            )
+        ) {
+            throw new Error('The configured row identity is empty.');
+        }
+        return `row-${identityParts.map((value) => String(value ?? '')).join('|')}`;
     }
 
     _formatRoleValues(values) {
@@ -342,10 +409,61 @@ export default class VibeTable extends LightningElement {
 
 Generate `IDENTITY_ROLE_KEY`, `COMPOSITE_IDENTITY_ROLE_KEYS`, `SORT_ROLE_KEY`,
 `SORT_DIRECTION`, `_formatRoleValue`, and `_compareRoleValues` from the
-confirmed contract and active query roles. A
-timeout must show a user-safe error and emit `error`; it must not silently hide
-the spinner. Sort only when the contract identifies a sort role, and describe
-the result as sorted within the returned limit.
+confirmed contract and active query roles. A timeout must show a user-safe error
+and emit `error`; it must not silently hide the spinner. Sort only when the
+contract identifies a sort role, and describe the result as sorted within the
+returned limit.
+
+## Date-only values
+
+Do not parse Salesforce `YYYY-MM-DD` values through UTC. Users west of UTC can
+otherwise see the preceding calendar day. Construct local calendar values from
+their numeric parts; retain invalid values rather than rendering `Invalid Date`.
+
+```javascript
+_formatDate(value) {
+    if (!value) return '';
+    const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value));
+    const date = dateOnly
+        ? new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]))
+        : new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return date.toLocaleDateString(undefined, {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric'
+    });
+}
+```
+
+Run this logic under `TZ=America/Los_Angeles` in maintainer validation.
+
+## Template states and result copy
+
+Render loading, error, no-data, and table states explicitly. Give every spinner
+non-empty alternative text. The limit is not a global ranking guarantee, so use
+bounded, prompt-derived wording in visible and assistive text.
+
+```html
+<template lwc:if={isLoading}>
+  <lightning-spinner alternative-text={loadingLabel} size="small"></lightning-spinner>
+</template>
+<template lwc:if={hasError}>
+  <p class="slds-text-color_error" role="alert">{errorMessage}</p>
+</template>
+<template lwc:if={showNoData}>
+  <p>{noDataMessage}</p>
+</template>
+<template lwc:if={showTable}>
+  <p class="slds-text-body_small">{boundedResultDescription}</p>
+  <table class="slds-table slds-table_cell-buffer" aria-label={tableAccessibleLabel}>
+    <!-- Prompt-derived column headings and rows -->
+  </table>
+</template>
+```
+
+Use "returned rows" or "returned groups" for aggregate visualizations, not a
+record noun unless an identity dimension defines the result grain.
 
 ## Verification
 
@@ -354,8 +472,11 @@ After generation, verify:
 
 1. `ROLE_DEFINITIONS`, `specs`, and `indexByRole` have identical role counts.
 2. Every dimension precedes every measure.
-3. Every qualified raw measure has a confirmed aggregation.
+3. Every qualified raw measure has a supported uppercase aggregation.
 4. Every bare calculated measure omits aggregation.
 5. The identity or composite produces stable non-empty row keys.
 6. The visible field order and labels match the prompt.
 7. Dashboard filters update rows without explicit `fetchData()`.
+8. Direct, `{ rows }`, and `{ data }` payloads all reach row processing.
+9. Delayed SDK assignment starts once through the setter-scheduled microtask.
+10. No query startup or synchronization occurs in `renderedCallback`.

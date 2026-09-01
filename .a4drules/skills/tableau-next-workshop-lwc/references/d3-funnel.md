@@ -103,10 +103,13 @@ contrast. Values must be finite and nonnegative before scaling.
 ```javascript
 const specs = [
     { model: this.stepField.name, rowGrouping: true },
-    measureSpecFromBinding(this.valueField)
+    measureSpecFromBinding(this.valueField, VALUE_ALLOWED_AGGREGATIONS)
 ];
 // Row contract: [step, value].
 ```
+
+Generate `VALUE_ALLOWED_AGGREGATIONS` from the confirmed funnel value and its
+formatter. Do not silently reinterpret a monetary value as a count.
 
 ## Verification
 

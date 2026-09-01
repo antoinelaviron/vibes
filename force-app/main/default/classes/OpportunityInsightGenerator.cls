@@ -1,11 +1,19 @@
 /**
  * Compatibility endpoint for workshop components generated before the generic
- * RecordInsightGenerator contract. New components import RecordInsightGenerator.
+ * RecordInsightGenerator contract. New bundles import RecordInsightGenerator;
+ * this class only adapts legacy flat Opportunity rows to its generic envelope.
  */
 public with sharing class OpportunityInsightGenerator {
+    private static final Integer MAX_LEGACY_PAYLOAD_LENGTH = 12000;
+    private static final String FALLBACK_MESSAGE =
+        'Unable to generate insight. Please retry.';
+
     @AuraEnabled(cacheable=false)
     public static String generateInsight(String rowJson) {
         try {
+            if (rowJson != null && rowJson.length() > MAX_LEGACY_PAYLOAD_LENGTH) {
+                return FALLBACK_MESSAGE;
+            }
             Map<String, Object> legacy = (Map<String, Object>) JSON.deserializeUntyped(
                 String.isBlank(rowJson) ? '{}' : rowJson
             );
@@ -32,7 +40,7 @@ public with sharing class OpportunityInsightGenerator {
             };
             return RecordInsightGenerator.generateInsight(JSON.serialize(envelope));
         } catch (Exception error) {
-            return 'Unable to generate insight. Please retry.';
+            return FALLBACK_MESSAGE;
         }
     }
 }

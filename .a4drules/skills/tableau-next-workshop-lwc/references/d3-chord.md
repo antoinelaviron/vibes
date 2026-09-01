@@ -77,15 +77,21 @@ arc position alone.
 const specs = [
     { model: this.sourceField.name, rowGrouping: true },
     { model: this.targetField.name, rowGrouping: true },
-    measureSpecFromBinding(this.weightField)
+    measureSpecFromBinding(this.weightField, WEIGHT_ALLOWED_AGGREGATIONS)
 ];
 // Row contract: [source, target, weight].
 ```
+
+Generate `WEIGHT_ALLOWED_AGGREGATIONS` from the confirmed relationship weight.
+Count aggregations are valid only when the prompt defines weight as a count.
 
 ## Verification
 
 - Unequal source and target cardinalities use `sourceValues.length` as the
   target offset.
+- Test unequal cardinality explicitly, for example two source values and three
+  target values. Assert a five-by-five matrix and target indexes beginning at
+  two; equal-sized groups can hide an offset bug.
 - Both node groups have nonzero geometry for nonzero relationships.
 - Identical raw values on opposite sides remain distinct nodes.
 - Node labels and textual summaries identify source versus target semantics.

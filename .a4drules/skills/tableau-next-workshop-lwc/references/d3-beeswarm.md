@@ -40,11 +40,18 @@ filter interaction merely because marks are clickable.
   overlap with `d3.forceCollide`.
 - Run about 120 ticks synchronously before drawing instead of animating every
   simulation tick.
+- Include `forceSimulation`, `forceX`, `forceY`, `forceCollide`, `scaleLinear`,
+  `extent`, and `axisBottom` in the required-D3-API check from `d3-in-lwc.md`.
+- Give the chart region a concrete or minimum height. If its measured width or
+  height is zero, surface the sizing diagnostic from `d3-in-lwc.md` and wait for
+  resize rather than running the simulation against a zero-size range.
 - Cache the category color domain across filter redraws so a category keeps the
   same color.
 - Provide an adjacent item/category/value table or list in addition to the
   visual summary. It preserves every mark's meaning and prevents category from
   being color-only. A visible legend names the category colors.
+- For many categories, allow the legend or adjacent list to wrap or scroll;
+  never shrink labels into overlap or rely on an expanding color palette alone.
 
 ## Core rendering shape
 
@@ -97,13 +104,14 @@ marks.
 const specs = [
     { model: this.itemField.name, rowGrouping: true },
     { model: this.categoryField.name, rowGrouping: true },
-    measureSpecFromBinding(this.valueField)
+    measureSpecFromBinding(this.valueField, VALUE_ALLOWED_AGGREGATIONS)
 ];
 // Row contract: [item, category, value].
 ```
 
 If the prompt does not need category color, omit the category role rather than
-inventing one. The specs then become item followed by value.
+inventing one. The specs then become item followed by value. Generate
+`VALUE_ALLOWED_AGGREGATIONS` from the confirmed value semantics and formatter.
 
 ## Verification
 
