@@ -10,9 +10,8 @@ description: |
   model calculated-field authoring.
 license: Apache-2.0
 metadata:
-  author: alaviron
-  version: workshop-5.1
-  fork_of: tableau-next-custom-lwc
+  author: Antoine Laviron
+  version: workshop-6.0
   api-version: v67.0
 ---
 
@@ -22,13 +21,15 @@ Build one prompt-authored extension through three deployable bundles:
 `vibeTable` -> `vibeInsight` -> `vibeAction`. Native Tableau Next data binding
 is the default. Hard-coded fields exist only as an explicit recovery path.
 
-This lifecycle was release-gated with 14 data-binding bundles in
-`26213playground`: automated tests, deployment, and live Tableau Next dashboard
-tests all passed. Treat `references/sdm-data-binding.md` as the validated
-canonical implementation contract.
+Each build creates a new bundle so attendees can add and validate it
+immediately. Reusing one bundle can leave the dashboard on its cached version
+for about two minutes, which slows the workshop loop and obscures whether the
+new code worked.
 
-Do not reuse this workshop fork for production LWC work. Use the canonical
-`tableau-next-custom-lwc` skill from `alaviron/tableau-skills` instead.
+This lifecycle was release-gated with 14 data-binding bundles in
+a test org: automated tests, deployment, and live Tableau Next dashboard tests
+all passed. Treat `references/sdm-data-binding.md` as the validated canonical
+implementation contract.
 
 `SKILL.md` is the routing and workshop-gate layer. For every data-backed
 component, `references/sdm-data-binding.md` and
@@ -179,14 +180,13 @@ from a reference.
 | Build 2: `vibeInsight` | Attendee's deployed `vibeTable` | Core lifecycle references, `apex-insight-panel.md` |
 | Build 3: `vibeAction` | Attendee's deployed `vibeInsight` | Core lifecycle references, `salesforce-action-link.md` |
 | D3 chart route | Purpose-built aggregate visualization when requested | Core lifecycle references, `d3-in-lwc.md`, matching `d3-*.md` |
-| Sparkline route | Preserve the inherited table behavior | Core lifecycle references, `d3-in-lwc.md`, `sparkline-column.md` |
 | Search, Kanban, or theme route | Preserve the inherited `vibeAction` contract | Core lifecycle references, attendee prompt, `test-contract.md` |
 | `vibeVideo` | Independent media tile | `video-player.md`; no SDK query or SDM discovery |
 
 Optional routes are loaded only when requested. Aggregate D3 routes may replace
-the table when the prompt says so; search, Kanban, theme, and sparkline routes
-preserve the inherited prompt-derived roles and behavior. Do not assume an
-Opportunity schema or Account action for any optional route.
+the table when the prompt says so; search, Kanban, and theme routes preserve the
+inherited prompt-derived roles and behavior. Do not assume an Opportunity schema
+or Account action for any optional route.
 
 ## The three builds
 
@@ -209,17 +209,22 @@ tabs whose only difference is the addition of the action control.
 1. Confirm the role contract, including property names, types, visibility,
    display order, formatting, row identity, sorting, interactions, query limit,
    and optional display limit.
-2. Scaffold `vibeTable.js`, `vibeTable.html`, and
+2. For a row-per-record surface, require a stable record identity dimension.
+   Keep it hidden when the prompt does not ask to display it. The canonical
+   Opportunity build uses required hidden `opportunityIdField`; visible business
+   fields are not a safe substitute because two records can share them. Include
+   this hidden role in the contract shown to the attendee for confirmation.
+3. Scaffold `vibeTable.js`, `vibeTable.html`, and
    `vibeTable.js-meta.xml`; add CSS only for iframe-safe layout needs.
-3. Use class `VibeTable`, master label `Vibe Table`, API `67.0`, and target
+4. Use class `VibeTable`, master label `Vibe Table`, API `67.0`, and target
    `analytics__Dashboard`.
-4. Compile every role into a native semantic property and private-backed
+5. Compile every role into a native semantic property and private-backed
    `@api` accessor.
-5. Register dimensions before measures and keep the final spec order as the
+6. Register dimensions before measures and keep the final spec order as the
    positional row contract.
-6. Render columns or marks in the prompt-derived display order using bound
+7. Render columns or marks in the prompt-derived display order using bound
    labels.
-7. Keep query and display limits explicit. A null display limit renders every
+8. Keep query and display limits explicit. A null display limit renders every
    returned row; a numeric display limit applies only after client-side sorting.
    Describe the result honestly: say "Up to 5,000 returned cases, sorted by
    displayed age," not "Top cases," unless server-side measure ordering has
@@ -278,7 +283,9 @@ in newly generated bundles.
    it is functionally dependent on the current row grain; adding a grouping ID
    must not split previously aggregated rows.
 5. Insert any new hidden dimension before every measure and rebuild the role
-   indexes.
+   indexes from that final order. The SDK returns grouped dimensions before
+   measures, so adding an action ID shifts every following position; stale
+   indexes can read Amount as the record ID or map later cells to the wrong role.
 6. Use the validated origin-rewrite and generic record-action pattern from
    `references/salesforce-action-link.md`.
 
@@ -332,7 +339,6 @@ roles; derive the business design from the prompt.
 | `d3-funnel.md`        | ordered step dimension, value measure                         |
 | `d3-radar.md`         | entity dimension and prompt-selected measures                 |
 | `d3-treemap.md`       | parent dimension, child dimension, size measure               |
-| `sparkline-column.md` | entity, period, and value; or labelled synthetic demo mode    |
 
 Do not add filter/selection behavior unless the prompt requests it. If the
 prompt requests interaction, publish against the configured source and role,
@@ -354,6 +360,10 @@ explicitly selects the recovery example.
 | Close date            | `closeDateField`     | `SemanticDimension` |
 | Opportunity type      | `typeField`          | `SemanticDimension` |
 | Amount                | `amountField`        | `SemanticMeasure`   |
+
+`opportunityIdField` is required and hidden. Use its raw value as the sole
+stable input to `rowKey`; do not include it in the visible table or insight
+context unless the attendee explicitly asks for it.
 
 For the canonical Build 3 only, an Account Log a Call action may add hidden
 `accountIdField: SemanticDimension`, validate prefixes `001`, and use
@@ -410,13 +420,15 @@ Read `references/test-contract.md` before deployment and
 
 1. Compare Build 1 -> 2 -> 3 metadata as structured properties.
 2. Verify all dimensions precede measures in every query.
-3. Verify each visible label and accessible name comes from the prompt or a
+3. For each row-per-record output, verify a stable identity role is queried,
+   remains hidden unless requested, and is the sole source of `rowKey`.
+4. Verify each visible label and accessible name comes from the prompt or a
    mapped binding.
-4. Run a canonical Opportunity generation and an unrelated Support Case
+5. Run a canonical Opportunity generation and an unrelated Support Case
    generation; the latter must contain no leaked sales roles or actions.
-5. Smoke-test the concrete mapped query through
+6. Smoke-test the concrete mapped query through
    `references/smoke-test-query.md`.
-6. Exercise loaded, no-data, error, filter refresh, insight focus, stale
+7. Exercise loaded, no-data, error, filter refresh, insight focus, stale
    response, and action validation behavior in a live dashboard.
 
 ## Files
@@ -425,7 +437,6 @@ Read `references/test-contract.md` before deployment and
 .a4drules/skills/tableau-next-workshop-lwc/
 |-- SKILL.md
 |-- README.md
-|-- IMPROVEMENTS.md
 `-- references/
     |-- sdm-data-binding.md
     |-- sdk-query-lifecycle.md
@@ -441,7 +452,6 @@ Read `references/test-contract.md` before deployment and
     |-- d3-funnel.md
     |-- d3-radar.md
     |-- d3-treemap.md
-    |-- sparkline-column.md
     |-- video-player.md
     |-- skill-evals.md
     `-- test-contract.md
@@ -449,9 +459,7 @@ Read `references/test-contract.md` before deployment and
 
 ## Attribution
 
-Forked from `tableau-next-custom-lwc` at `alaviron/tableau-skills` (Tableau
-Next tooling team). Wire-format behavior was verified from internal reference
-tooling and live workshop prototypes. This fork remains DF26-specific.
-
-`IMPROVEMENTS.md` is a historical decision record only. It does not override
-`SKILL.md` or the routed references.
+Created by Antoine Laviron for the DF26 workshop. Built on Salesforce's
+[Enhance Your Dashboard Functionality with Custom LWC Extensions](https://developer.salesforce.com/docs/analytics/tableau-next-isv-dev/guide/tn-development-dashboard-extensions.html),
+published August 31, 2026, and validated through workshop tests and live Tableau
+Next dashboard runs.

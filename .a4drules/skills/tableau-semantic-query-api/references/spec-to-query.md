@@ -4,32 +4,32 @@ The workshop LWC skill's SDK specs and the Semantic Query API's field entries
 are two representations of the same query. Use this table to translate between
 them.
 
-## Object-scoped dimensions (e.g. `Opportunity.CustomerAccount`)
+## Object-scoped dimensions
 
 **SDK spec:**
 ```javascript
-{ model: 'Opportunity.CustomerAccount', rowGrouping: true }
+{ model: 'Orders.Region', rowGrouping: true }
 ```
 
 **Semantic Query field:**
 ```json
 {
-  "expression": { "table_field": { "name": "CustomerAccount", "table_name": "Opportunity" } },
+  "expression": { "table_field": { "name": "Region", "table_name": "Orders" } },
   "grouping": "ROW_GROUPING"
 }
 ```
 
-## Object-scoped raw measures (e.g. `Opportunity.Probability`)
+## Object-scoped raw measures
 
 **SDK spec:**
 ```javascript
-{ model: 'Opportunity.Probability', rowGrouping: false, aggregationType: 'SUM' }
+{ model: 'Orders.Sales', rowGrouping: false, aggregationType: 'SUM' }
 ```
 
 **Semantic Query field:**
 ```json
 {
-  "expression": { "table_field": { "name": "Probability", "table_name": "Opportunity" } },
+  "expression": { "table_field": { "name": "Sales", "table_name": "Orders" } },
   "semantic_aggregation_method": "SEMANTIC_AGGREGATION_METHOD_SUM"
 }
 ```
@@ -38,13 +38,13 @@ them.
 
 **SDK spec:**
 ```javascript
-{ model: 'Total_Amount_clc', rowGrouping: false }
+{ model: 'Total_Sales_clc', rowGrouping: false }
 ```
 
 **Semantic Query field:**
 ```json
 {
-  "expression": { "semantic_field": { "name": "Total_Amount_clc" } },
+  "expression": { "semantic_field": { "name": "Total_Sales_clc" } },
   "semantic_aggregation_method": "SEMANTIC_AGGREGATION_METHOD_USER_AGG"
 }
 ```

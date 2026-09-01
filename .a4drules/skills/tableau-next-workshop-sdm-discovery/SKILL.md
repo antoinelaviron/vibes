@@ -13,9 +13,9 @@ description: |
   Do NOT use to create calculated fields or metrics.
 license: Apache-2.0
 metadata:
-  author: alaviron
-  version: workshop-4.0
-  api_version: v67.0
+  author: Antoine Laviron
+  version: workshop-6.0
+  api-version: v67.0
 ---
 
 # tableau-next-workshop-sdm-discovery
@@ -224,8 +224,7 @@ Rules for populating the JSON:
   measurement when available because metrics often fail to resolve from LWC
   extensions.
 
-**Field metadata rule** (HAR-verified against `tmp-df26-workshop`,
-2026-07-10):
+**Field metadata rule** (verified against a test org on 2026-07-10):
 
 | Field kind | `tableName` | Registered-query model | `rowGrouping` | Aggregation |
 |---|---|---|---|---|

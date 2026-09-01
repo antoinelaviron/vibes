@@ -12,8 +12,8 @@ description: |
   asks "test this query first", or when validating a semantic model change.
 license: Apache-2.0
 metadata:
-  author: alaviron
-  version: workshop-1.0
+  author: Antoine Laviron
+  version: workshop-6.0
   api-version: v67.0
 ---
 
@@ -53,17 +53,17 @@ success).
   "structuredSemanticQuery": {
     "fields": [
       {
-        "expression": { "table_field": { "name": "CustomerAccount", "table_name": "Opportunity" } },
+        "expression": { "table_field": { "name": "Region", "table_name": "Orders" } },
         "grouping": "ROW_GROUPING"
       },
       {
-        "expression": { "semantic_field": { "name": "Total_Amount_clc" } },
+        "expression": { "semantic_field": { "name": "Total_Sales_clc" } },
         "semantic_aggregation_method": "SEMANTIC_AGGREGATION_METHOD_USER_AGG"
       }
     ],
     "options": { "limit_options": { "limit": 5 } }
   },
-  "semanticModelId": "2SMfj0000018nFtGAI"
+  "semanticModelId": "<semantic-model-record-id>"
 }
 ```
 
@@ -83,7 +83,7 @@ success).
 
 ```json
 {
-  "expression": { "table_field": { "name": "CustomerAccount", "table_name": "Opportunity" } },
+  "expression": { "table_field": { "name": "Region", "table_name": "Orders" } },
   "grouping": "ROW_GROUPING"
 }
 ```
@@ -96,7 +96,7 @@ success).
 
 ```json
 {
-  "expression": { "semantic_field": { "name": "Total_Amount_clc" } },
+  "expression": { "semantic_field": { "name": "Total_Sales_clc" } },
   "semantic_aggregation_method": "SEMANTIC_AGGREGATION_METHOD_USER_AGG"
 }
 ```
@@ -127,7 +127,7 @@ already inside the expression. Overriding causes HTTP 400.**
     "sort_orders": [
       {
         "simple_sort_order": {
-          "sort_by_field": { "semantic_field": { "name": "Total_Amount_clc" } },
+          "sort_by_field": { "semantic_field": { "name": "Total_Sales_clc" } },
           "sorting_order": "DESC"
         }
       }
@@ -146,7 +146,7 @@ export SF_ORG=<alias>
 export SF_TOKEN=$(sf org auth show-access-token --target-org $SF_ORG --json | jq -r '.result.accessToken')
 export SF_INSTANCE=$(sf org display --target-org $SF_ORG --json | jq -r '.result.instanceUrl')
 
-SDM_APINAME="Sales_Cloud_00Dfj00000VRQK1EAP"
+SDM_APINAME="<semantic-model-api-name>"
 SDM_ID=$(curl -s -H "Authorization: Bearer $SF_TOKEN" \
   "$SF_INSTANCE/services/data/v67.0/ssot/semantic/models/$SDM_APINAME" \
   | jq -r '.id')
@@ -187,8 +187,8 @@ becomes one field entry. The mapping:
   "queryResults": {
     "queryMetadata": {
       "fields": {
-        "CustomerAccount": { "placeInOrder": 0, "type": "VARCHAR" },
-        "User agg Total_Amount_clc": { "placeInOrder": 1, "type": "NUMERIC" }
+        "Region": { "placeInOrder": 0, "type": "VARCHAR" },
+        "User agg Total_Sales_clc": { "placeInOrder": 1, "type": "NUMERIC" }
       }
     },
     "queryData": {
@@ -213,7 +213,7 @@ the LWC skill works.
 | `Unrecognized field "semanticQuery"` | Wrong envelope key | Use `structuredSemanticQuery` |
 | `Unrecognized field "aggregationType"` | Old-style key | Use `semantic_aggregation_method` |
 | `unknown column '<X>'` | Field name typo or wrong casing | Re-check via SDM discovery |
-| `table "<X>" does not exist` | Used SDM apiName as table_name | Use the object's apiName (e.g. `Opportunity`, not `Sales_Cloud_…`) |
+| `table "<X>" does not exist` | Used SDM apiName as table_name | Use the semantic object's apiName, not the semantic model's apiName |
 | `Aggregation not allowed` | Passed `SUM` etc. on a `*_clc`/`*_mtc` | Use `SEMANTIC_AGGREGATION_METHOD_USER_AGG` or omit |
 | `Cannot resolve identifier` | Field doesn't exist on this SDM | Check SDM payload via `GET /ssot/semantic/models/{apiName}` |
 

@@ -44,8 +44,7 @@ or synchronization mechanism.
 - Schedule chart rendering after reactive data state commits.
 - Attach `ResizeObserver` only after the chart container exists. Make setup
   idempotent and generation-guard delayed resize rendering.
-- Read responsive dimensions from `getBoundingClientRect()`. Compact
-  sparklines are the deliberate fixed-size exception.
+- Read responsive dimensions from `getBoundingClientRect()`.
 - Scoped CSS does not style imperatively created external nodes. Prefer SVG
   attributes; style detached tooltips through `.style.*` when needed.
 - Avoid `url(#id)` fragment references for gradients, masks, and clips across

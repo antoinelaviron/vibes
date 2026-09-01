@@ -1,10 +1,13 @@
 # tableau-next-workshop-lwc
 
-Fork of `tableau-next-custom-lwc`, narrowed for the DF26 vibe-coding workshop.
+Attendee-facing skill for the DF26 vibe-coding workshop.
 
 Three core builds, one LWC each: `vibeTable` -> `vibeInsight` -> `vibeAction`.
 Native Tableau Next data binding is the default; hard-coded SDM fields remain
 available as the basic/recovery path.
+
+Each build uses a new bundle so attendees can validate it immediately instead
+of waiting about two minutes for a redeployed LWC to leave the dashboard cache.
 
 The skill derives each component's semantic roles, visible fields, labels,
 formatting, insight payload, and Salesforce action from the attendee's prompt.
@@ -15,9 +18,9 @@ attendees call it from Build 2 but do not write or deploy Apex.
 ## Validated native-binding foundation
 
 The native-binding lifecycle in this skill was validated end to end in
-`26213playground`. Fourteen data-binding workshop bundles passed their unit
-tests, deployed together successfully, and were then tested successfully in
-live Tableau Next dashboards on August 31, 2026.
+a test org. Fourteen data-binding workshop bundles passed their unit tests,
+deployed together successfully, and were then tested successfully in live
+Tableau Next dashboards on August 31, 2026.
 
 The validated default is intentionally small:
 
@@ -48,14 +51,15 @@ signatures, or in-place re-registration to the default pattern. Those
 mechanisms caused a live host-spinner failure in the earlier implementation and
 are unnecessary for the validated contract.
 
-Optional routes cover D3 visualizations, sparklines, local search, Kanban,
-themes, and a media-only video tile. `SKILL.md` routes each request to focused
+Optional routes cover D3 visualizations, local search, Kanban, themes, and a
+media-only video tile. `SKILL.md` routes each request to focused
 references, including D3, video, and test contracts. For every data-backed
 component, `references/sdk-query-lifecycle.md` and
 `references/sdm-data-binding.md` express the same August 31 live-gated
 lifecycle contract.
 
-**Not for production use.** For real Tableau Next LWC work, use the canonical
-`tableau-next-custom-lwc` skill.
-
 See [SKILL.md](SKILL.md) for the full skill spec.
+
+Created by Antoine Laviron. Built on Salesforce's
+[dashboard extension development guide](https://developer.salesforce.com/docs/analytics/tableau-next-isv-dev/guide/tn-development-dashboard-extensions.html),
+published August 31, 2026.

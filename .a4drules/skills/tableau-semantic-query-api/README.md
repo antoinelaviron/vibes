@@ -13,8 +13,8 @@ See [SKILL.md](SKILL.md) for the full API surface and rules.
 ## Quick smoke test
 
 ```bash
-export SF_ORG=tmp-df26-workshop
-./scripts/smoke.sh $SF_ORG Sales_Cloud_00Dfj00000VRQK1EAP /tmp/q.json
+export SF_ORG=<org-username-or-alias>
+./scripts/smoke.sh "$SF_ORG" <semantic-model-api-name> /tmp/q.json
 ```
 
 Exit code 0 = query works, encode into LWC. Non-zero = HTTP 400, iterate.

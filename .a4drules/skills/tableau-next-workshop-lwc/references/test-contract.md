@@ -4,7 +4,7 @@ Use the short path during the live workshop and the regression matrix before
 shipping skill or pre-baked infrastructure changes.
 
 The current native-binding foundation completed this gate in
-`26213playground`: 14 data-binding bundles passed automated verification,
+a test org: 14 data-binding bundles passed automated verification,
 deployment, and live Tableau Next dashboard testing. This live-proven result
 establishes setter-scheduled one-shot startup, without source hydration or
 binding signatures, as the required regression contract for later changes.
@@ -70,6 +70,7 @@ in-place rebinding.
 | Area | Required behavior |
 | --- | --- |
 | Role derivation | Properties, labels, formatting, sorting, insight context, and actions match the prompt; no canonical sales leakage enters unrelated prompts. |
+| Row identity | Every row-per-record surface queries a hidden stable record ID and derives `rowKey` from it alone; visible fields are not treated as unique. |
 | Role inheritance | Build 2 and Build 3 preserve every inherited property name, type, requiredness, purpose, semantic role, display behavior, and row key. |
 | SDK startup | Setter-scheduled delayed assignments converge on one registration; `renderedCallback` is not a query path. |
 | Registration | Subscription and loading precede registration; synchronous `dataUpdate` remains final; the options include `{ limit: QUERY_LIMIT }`. |
@@ -96,7 +97,6 @@ in-place rebinding.
 | Funnel | Prompt order wins; unknown steps sort last; no implicit terminal-category exclusion occurs. |
 | Radar | Axis properties match the prompt; scales, directions, and formatters are independent. |
 | Treemap | Sizes are finite and nonnegative; duplicate child labels stay parent-scoped; hidden visual labels remain in text. |
-| Sparkline | Real periods sort correctly; synthetic mode is deterministic and visibly disclosed. |
 | Kanban | When requested, inherited insight/action behavior remains intact; IDs are sanitized and unique; select-plus-Move works without drag and announces the result. |
 | Video security | Exact supported YouTube hosts and safe native URLs pass; lookalikes, unsafe protocols, credentials, ports, disallowed query strings, and fragments fail before DOM assignment; embeds use the fixed YouTube origin and `strict-origin-when-cross-origin`, while native media uses `no-referrer`. |
 | Video playback | Setter changes reapply native DOM properties and call `load()` only on source changes; blocked autoplay exposes visible Play recovery and controls; hidden controls never remove the Pause path. |
@@ -129,40 +129,13 @@ the pre-baked class before the session.
   semantics.
 - Interactive D3 marks have keyboard, focus, and selected-state behavior, or a
   native-control alternative.
-- Informative SVGs have a title, description, and textual equivalent; decorative
-  sparklines are hidden and accompanied by row summaries.
+- Informative SVGs have a title, description, and textual equivalent.
 - Color is never the only way to distinguish categories, sides, or state.
 - Focus remains visible and predictable throughout panel swaps.
 - Kanban movement has a non-drag keyboard path, visible instructions, and a live
   announcement.
 - Autoplaying or moving media always has an operable pause control; blocked
   autoplay recovery and caption availability are visible and programmatic.
-
-## Maintainer evidence command
-
-The playground command below reruns the 14 native-binding suites that supported
-the prior live gate. It is informational evidence, not proof of every assertion
-in this document: add focused generation or component tests for new wrapper,
-reconnect, D3 post-render loading, or feature behavior. Run it from that
-repository without changing its files.
-
-```bash
-TZ=America/Los_Angeles npm run test:unit -- -- --runInBand \
-  force-app/main/default/lwc/vibeSimpleDataBinding/__tests__/vibeSimpleDataBinding.test.js \
-  force-app/main/default/lwc/vibeTableDataBinding/__tests__/vibeTableDataBinding.test.js \
-  force-app/main/default/lwc/vibeInsightDataBinding/__tests__/vibeInsightDataBinding.test.js \
-  force-app/main/default/lwc/vibeActionDataBinding/__tests__/vibeActionDataBinding.test.js \
-  force-app/main/default/lwc/vibeChartDataBinding/__tests__/vibeChartDataBinding.test.js \
-  force-app/main/default/lwc/vibeChordDataBinding/__tests__/vibeChordDataBinding.test.js \
-  force-app/main/default/lwc/vibeSparklineDataBinding/__tests__/vibeSparklineDataBinding.test.js \
-  force-app/main/default/lwc/vibeSearchDataBinding/__tests__/vibeSearchDataBinding.test.js \
-  force-app/main/default/lwc/vibeKanbanDataBinding/__tests__/vibeKanbanDataBinding.test.js \
-  force-app/main/default/lwc/vibeThemeDataBinding/__tests__/vibeThemeDataBinding.test.js \
-  force-app/main/default/lwc/vibeOrgChartDataBinding/__tests__/vibeOrgChartDataBinding.test.js \
-  force-app/main/default/lwc/vibeShowcaseDataBinding/__tests__/vibeShowcaseDataBinding.test.js \
-  force-app/main/default/lwc/vibeStackedAreaDataBinding/__tests__/vibeStackedAreaDataBinding.test.js \
-  force-app/main/default/lwc/vibeRadialLollipopDataBinding/__tests__/vibeRadialLollipopDataBinding.test.js
-```
 
 For pre-baked Apex changes, run the project's available org validation or a
 dry-run deploy against the workshop org. The starter has no local connector mock

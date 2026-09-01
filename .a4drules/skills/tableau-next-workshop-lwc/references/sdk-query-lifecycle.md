@@ -6,7 +6,7 @@ role compilation, while this one isolates the live-proven startup and query
 lifecycle.
 
 Fourteen native-binding bundles passed automated verification, deployment, and
-live Tableau Next dashboard testing in `26213playground` on August 31, 2026.
+live Tableau Next dashboard testing in a test org on August 31, 2026.
 The validated default is setter-scheduled one-shot startup. Do not replace it
 with discovery-first code, source hydration, rendered query startup, or dynamic
 rebinding.

@@ -6,7 +6,7 @@ author map prompt-derived semantic roles without editing the generated LWC.
 
 This pattern is release-gated. Fourteen workshop data-binding bundles passed
 automated verification, deployment, and live Tableau Next dashboard testing in
-`26213playground`, with live sign-off on August 31, 2026. The results establish
+a test org, with live sign-off on August 31, 2026. The results establish
 setter-scheduled one-shot startup as the canonical workshop pattern.
 
 ## Contents
@@ -102,7 +102,8 @@ from the attendee's prompt. Preserve these invariants:
 
 - One `sdmName: SemanticModel` property.
 - One static semantic property per confirmed role.
-- A stable row identity role or confirmed deterministic composite.
+- A stable record identity role for every row-per-record surface, or a confirmed
+  deterministic composite for a non-record grain.
 - Explicit visible/hidden status and display order.
 - Explicit formatting for currency, percentage, duration, and date roles.
 - Explicit sorting semantics, including whether sorting applies only to the
@@ -334,16 +335,22 @@ _mapRow(rawRow, index) {
         values[role.key] = rawRow[this._indexByRole[role.key]] ?? null;
     }
     const identity = values[ROW_IDENTITY_ROLE];
+    if (identity === null || identity === undefined || String(identity) === '') {
+        throw new Error('The configured row identity is empty.');
+    }
     return {
-        rowKey: `row-${index}-${String(identity ?? '')}`,
+        rowKey: `row-${String(identity)}`,
         values,
         displayValues: this._formatRoleValues(values)
     };
 }
 ```
 
-If one role is not a stable identity, use a prompt-confirmed deterministic
-composite. Never use `Math.random()` or an index alone.
+For a row-per-record surface, require the record ID as a stable identity and
+keep it hidden unless the prompt requests it. Use a prompt-confirmed
+deterministic composite only when the output grain is not an individual record
+and the composite is provably unique. Never use `Math.random()`, an index, or
+visible descriptive fields that can repeat.
 
 Render visible fields through generated cells in the prompt-derived display
 order. Use bound labels for headers. Use a date-only branch for Salesforce date

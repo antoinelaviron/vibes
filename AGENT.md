@@ -37,11 +37,11 @@ FIRST, then act:
 
 - "Tableau Next", "dashboard extension", "extension LWC"
 - "vibeTable", "vibeInsight", "vibeAction", "vibeChart", "vibeChord",
-  "vibeSparkline", "vibeSearch", "vibeKanban", "vibeTheme", "vibeVideo"
+  "vibeSearch", "vibeKanban", "vibeTheme", "vibeVideo"
 - "analytics__Dashboard", "semantic model", "SDM"
 - "top opportunities", "Insight button", "Log a Call", "record action"
 - "Build 1", "Build 2", "Build 3"
-- "sparkline", "Kanban", "video tile", "chord diagram", "D3 chart"
+- "Kanban", "video tile", "chord diagram", "D3 chart"
 
 ## Landmines to avoid (the skills fix all of these)
 
@@ -90,7 +90,7 @@ was written after the workshop team hit each of these traps.
   `references/sdm-data-binding.md` and `references/sdk-query-lifecycle.md` for
   every data-backed component, then load the feature-specific reference. The
   two lifecycle references encode the same August 31 live-gated contract. Do
-  not treat `IMPROVEMENTS.md` as a second source of implementation code.
+  not invent a second implementation path.
 - **SDK startup**: use setter-scheduled one-shot startup from private-backed
   `@api` accessors plus `connectedCallback`. Never initiate or synchronize a
   query from `renderedCallback`; never hydrate with `getDataSource/getJson`,
@@ -110,6 +110,11 @@ order, formatting, sorting, insight context, and requested interactions.
 Builds 2 and 3 inherit that contract unchanged and add only their requested
 feature. Opportunity, Account, Amount, and Log a Call are the canonical DF26
 worked example, not universal component defaults.
+
+For the canonical row-per-opportunity build, include a required hidden
+Opportunity ID semantic dimension and use it as the stable row key. Account
+name, stage, close date, and type can repeat across opportunities and therefore
+cannot guarantee one row per record.
 
 ## When in doubt
 

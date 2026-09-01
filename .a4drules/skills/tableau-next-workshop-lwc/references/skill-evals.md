@@ -8,7 +8,7 @@ mechanics remain intact. They do not replace live dashboard verification.
 
 | Case | Prompt | Required evidence | Forbidden leakage |
 | --- | --- | --- | --- |
-| Canonical sales | Create top opportunities showing account, stage, close date, type, and amount; add an insight and Account Log a Call. | Opportunity roles, dimensions before amount, generic `RecordInsightGenerator` endpoint, hidden Account ID before measures, and the confirmed canonical `Global.LogACall` descriptor with prefix `001`. | Hard-coded field API names in native mode, `fetchData()`, or `NavigationMixin`. |
+| Canonical sales | Create top opportunities showing account, stage, close date, type, and amount; add an insight and Account Log a Call. | Required hidden Opportunity ID as the stable row identity, dimensions before amount, generic `RecordInsightGenerator` endpoint, hidden Account ID before measures, and the confirmed canonical `Global.LogACall` descriptor with prefix `001`. | A composite key made from visible fields, hard-coded field API names in native mode, `fetchData()`, or `NavigationMixin`. |
 | Support cases | Show case number, customer, priority, status, owner, and age; add Explain Case and Open Case. | Case-named properties, bound labels, a Case insight envelope, and a Case record-page descriptor. | `opportunityIdField`, `amountField`, `Opportunity Insight`, `accountIdField`, `Global.LogACall`, or prefix `001`. |
 | Suppliers | List active suppliers with region and risk category. | Dimension-only role contract and no invented sort measure. | Any amount or score measure, sales action, or fabricated row action. |
 | Subscriptions | Show subscriptions with ARR and active seats. | Two measure properties after every dimension, explicit formatters, and a selected sort role. | Interleaved measure/dimension specs or inferred currency without confirmation. |
@@ -32,7 +32,6 @@ confirmed canonical example; they are never defaults.
 | Funnel | Applications through submitted, review, interview, and decision. | Exact prompt order; step and value roles; unknown steps last. | Salesforce stage order or Closed Lost behavior. |
 | Radar | Suppliers compared on quality, lead time, cost, sustainability, and reliability. | One generated measure property per axis; per-axis direction and formatter. | Fixed five sales measures or one shared scale. |
 | Treemap | Cloud spend by department and service. | Parent, child, and size; nonnegative values; textual leaf summary. | Industry, Account, or revenue-specific labels. |
-| Sparkline | Device temperature by hour. | Entity, period, and value; chronological ordering. | Synthetic history or current-amount assumptions. |
 | Kanban | Service requests grouped by current status. | Prompt-derived columns, sanitized unique ARIA IDs, visible instructions, select-plus-Move keyboard path, and live result announcement. | Stage-specific vocabulary, drag-only operation, or unsanitized IDs. |
 | Video | Create a media-only training video tile. | API 67; no SDK/discovery/query/Apex; strict media URL policy; fixed-origin YouTube reconstruction; blocked-autoplay recovery; pause control; captions guidance; native `no-referrer` and YouTube `strict-origin-when-cross-origin`. | Generic `?v=` matching, raw URL assignment, swallowed play rejection, or data-binding code. |
 
@@ -78,6 +77,8 @@ Apply these assertions to every data-backed native-binding output:
   `window.open(url, '_blank', 'noopener')`, not `NavigationMixin`.
 - Adding a hidden action dimension preserves dimensions-before-measures order
   and does not change the inherited row grain or visible columns.
+- A row-per-record Build 1 queries a stable hidden record identity and derives
+  `rowKey` from it without using a query index or repeatable descriptive fields.
 - A chord test fixture has unequal source and target cardinalities and asserts
   the target offset uses the source count, both node groups have geometry, and
   the matrix is symmetric.
@@ -133,7 +134,7 @@ Typical absence checks:
 - `<property name="sdk"`
 - `NavigationMixin`
 - `position: fixed` for the insight panel
-- `Math.random()` for stable row or trend behavior
+- `Math.random()` for stable row behavior
 - `SDO_`
 
 For every non-sales prompt, also assert that canonical example tokens do not
