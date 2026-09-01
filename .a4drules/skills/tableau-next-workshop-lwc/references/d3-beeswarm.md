@@ -1,145 +1,129 @@
-# d3-beeswarm — one-dimensional density scatter (deal-size distribution)
+# D3 beeswarm: one-dimensional distribution
 
-**Attribution:** shape adapted from an internal reference `beeswarmChart`
-implementation. That version loads D3 from a CDN and uses static country data — this reference
-loads D3 the LWC-native way (per `references/d3-in-lwc.md`) and reads
-from the workshop's Sales Cloud SDM instead.
+Use a beeswarm when the prompt asks for one mark per item positioned by a
+numeric value and optionally grouped by a category. It shows density without
+bucket boundaries.
 
-**What this teaches:** how to render a 1D density scatter — one dot per
-opportunity, positioned by `Total_Amount_clc` on the X axis, colored
-by `Opportunity_Stage`, spread on Y via `d3.forceCollide` so dots
-don't overlap. Great "look how many deals are stuck at low amount
-but a handful huge ones" story with no bucketing.
+## Contents
 
-**Sales Cloud SDM fit:** one row per opportunity — `Opportunity_Id`
-(dim), `Opportunity_Stage` (dim, colors), `Total_Amount_clc` (calc
-measure, X position). All three exist in the workshop template SDM.
-Attendee prompt shape: *"show every opportunity as a dot on an amount
-axis, colored by stage."*
+- [Semantic roles](#semantic-roles)
+- [Layout rules](#layout-rules)
+- [Core rendering shape](#core-rendering-shape)
+- [Query shape](#query-shape)
+- [Verification](#verification)
+- [DF26 worked example](#df26-worked-example)
 
-**Do NOT copy this file verbatim.** SDM apiNames come from the
-discovery hand-off.
+## Semantic roles
 
-## Rules
+| Property | Type | Purpose |
+|---|---|---|
+| `itemField` | `SemanticDimension` | Stable mark identity |
+| `categoryField` | `SemanticDimension` | Optional color grouping |
+| `valueField` | `SemanticMeasure` | Horizontal position |
 
-- **Every rule from `references/d3-in-lwc.md` applies.**
-  `lwc:dom="manual"` on the chart container, `_pendingRows` buffer,
-  D3 via `loadScript` from the `d3` static resource (not a CDN — the
-  analytics iframe's CSP blocks arbitrary CDNs), `ResizeObserver`
-  attached from the render function.
-- **`registerFieldsForQuery`** — follow the canonical lifecycle in
-  `references/sdk-query-lifecycle.md`. Keep all dimensions first and the calc
-  measure last (Gate #6). Query one row per opportunity — a raw
-  `Opportunity.Opportunity_Id` dimension, NOT a rollup.
-- **`d3.forceCollide` runs on the client** — no server-side layout.
-  Tick the simulation ~120 times synchronously before drawing;
-  animating each tick chokes on 200+ nodes.
-- **Cap the row count.** Beeswarm renders every row as a dot — start
-  with `limit: 200` in `registerFieldsForQuery`. Above ~500 nodes the
-  force simulation gets sluggish on a workshop laptop.
-- **Color scale by stage** — `d3.scaleOrdinal(d3.schemeCategory10)`
-  keyed on `Opportunity_Stage`. Cache the palette across redraws so
-  Closed Won stays green when a filter changes.
-- **Tooltip on hover** — position via inline `.style.left/top` (scoped
-  CSS won't reach imperatively-created nodes; see `d3-in-lwc.md`).
+Generate prompt-specific property names when they improve clarity. Keep the
+internal role keys `item`, `category`, and `value`. Query both dimensions before
+the measure and map rows to `{ item, category, value }`.
 
-## Annotated snippet — the force simulation
+Derive the chart title, value formatter, axis label, category legend, and
+interaction from the prompt. Do not infer currency from an API name or add a
+filter interaction merely because marks are clickable.
+
+## Layout rules
+
+- Apply every lifecycle rule in `d3-in-lwc.md`.
+- Use a default result limit of 200; a synchronous force simulation becomes
+  sluggish above roughly 500 marks on workshop laptops.
+- Coerce finite numeric values before layout and exclude invalid rows with a
+  visible result note.
+- Position marks with `d3.forceX`, center them with `d3.forceY`, and prevent
+  overlap with `d3.forceCollide`.
+- Run about 120 ticks synchronously before drawing instead of animating every
+  simulation tick.
+- Include `forceSimulation`, `forceX`, `forceY`, `forceCollide`, `scaleLinear`,
+  `extent`, and `axisBottom` in the required-D3-API check from `d3-in-lwc.md`.
+- Give the chart region a concrete or minimum height. If its measured width or
+  height is zero, surface the sizing diagnostic from `d3-in-lwc.md` and wait for
+  resize rather than running the simulation against a zero-size range.
+- Cache the category color domain across filter redraws so a category keeps the
+  same color.
+- Provide an adjacent item/category/value table or list in addition to the
+  visual summary. It preserves every mark's meaning and prevents category from
+  being color-only. A visible legend names the category colors.
+- For many categories, allow the legend or adjacent list to wrap or scroll;
+  never shrink labels into overlap or rely on an expanding color palette alone.
+
+## Core rendering shape
 
 ```javascript
-_renderChart() {
-    const container = this.template.querySelector('.chart-container');
-    const { width, height } = container.getBoundingClientRect();
-    const margin = { top: 20, right: 20, bottom: 40, left: 20 };
+const xScale = d3.scaleLinear()
+    .domain(d3.extent(this.rows, (row) => row.value))
+    .nice()
+    .range([margin.left, width - margin.right]);
 
-    const xScale = d3.scaleLinear()
-        .domain(d3.extent(this.rows, (d) => d.amount))
-        .range([margin.left, width - margin.right]);
+const nodes = this.rows.map((row) => ({ ...row }));
+const simulation = d3.forceSimulation(nodes)
+    .force('x', d3.forceX((row) => xScale(row.value)).strength(1))
+    .force('y', d3.forceY(height / 2))
+    .force('collide', d3.forceCollide(6))
+    .stop();
+for (let tick = 0; tick < 120; tick += 1) simulation.tick();
 
-    // Cluster dots along Y = middle, collide to spread them.
-    const sim = d3.forceSimulation(this.rows)
-        .force('x', d3.forceX((d) => xScale(d.amount)).strength(1))
-        .force('y', d3.forceY(height / 2))
-        .force('collide', d3.forceCollide(6))
-        .stop();
-    for (let i = 0; i < 120; i++) sim.tick();
+const svg = d3.select(container).append('svg')
+    .attr('width', width)
+    .attr('height', height)
+    .attr('role', 'img')
+    .attr('aria-labelledby', `${this._chartId}-title ${this._chartId}-desc`);
 
-    const color = d3.scaleOrdinal(d3.schemeCategory10)
-        .domain([...new Set(this.rows.map((d) => d.stage))]);
+svg.append('title').attr('id', `${this._chartId}-title`).text(this.chartTitle);
+svg.append('desc').attr('id', `${this._chartId}-desc`).text(this.chartDescription);
 
-    const svg = d3.select(container).append('svg')
-        .attr('width', width).attr('height', height);
+svg.append('g')
+    .attr('transform', `translate(0,${height - margin.bottom})`)
+    .call(d3.axisBottom(xScale).ticks(6).tickFormat(this._formatValue));
 
-    // X axis at the bottom.
-    svg.append('g')
-        .attr('transform', `translate(0,${height - margin.bottom})`)
-        .call(d3.axisBottom(xScale).ticks(6, '~s'));
-
-    svg.selectAll('circle')
-        .data(this.rows).enter().append('circle')
-        .attr('cx', (d) => d.x)                     // set by simulation
-        .attr('cy', (d) => d.y)
-        .attr('r', 5)
-        .attr('fill', (d) => color(d.stage))
-        .on('mouseover', (event, d) => this._showTip(event, d))
-        .on('mouseout',  () => this._hideTip());
-}
+svg.selectAll('circle')
+    .data(nodes, (row) => row.item)
+    .enter()
+    .append('circle')
+    .attr('cx', (row) => row.x)
+    .attr('cy', (row) => row.y)
+    .attr('r', 5)
+    .attr('fill', (row) => this._categoryColor(row.category));
 ```
 
-## Template — one container, `lwc:dom="manual"`
+Start `_renderChart` with `container.innerHTML = ''` for a full redraw. If the
+prompt requests interaction, keep the graphic descriptive and render adjacent
+native controls for each item. The controls use stable item keys, row-specific
+labels, visible focus, and the same filter or selection behavior as pointer
+marks.
 
-```html
-<template lwc:if={_isLoading}>
-  <lightning-spinner alternative-text="Loading opportunities" size="small"></lightning-spinner>
-</template>
-<template lwc:if={hasRows}>
-  <div class="chart-container" lwc:dom="manual"></div>
-</template>
-```
-
-Companion CSS — the container must have a real height, otherwise
-`getBoundingClientRect()` returns 0 and the SVG is blank (see
-`d3-in-lwc.md` common surprises):
-
-```css
-.chart-container { width: 100%; height: 400px; min-height: 0; }
-```
-
-## Wiring into the pipeline
-
-Query shape (three specs — all dimensions first, measure last;
-Gate #8):
+## Query shape
 
 ```javascript
 const specs = [
-    { model: `${OBJ_OPPORTUNITY}.<opportunity-id-dim>`, rowGrouping: true },
-    { model: `${OBJ_OPPORTUNITY}.<stage-dim>`,          rowGrouping: true },
-    { model: '<amount-calc-apiName>_clc',               rowGrouping: false }
+    { model: this.itemField.name, rowGrouping: true },
+    { model: this.categoryField.name, rowGrouping: true },
+    measureSpecFromBinding(this.valueField, VALUE_ALLOWED_AGGREGATIONS)
 ];
-// Row shape: [opportunityId, stage, amount].
+// Row contract: [item, category, value].
 ```
 
-In `_handleDataUpdate`, map to `{ id, stage, amount }` and stash on
-`this.rows`. Buffer via `_pendingRows` if `_d3Ready` is false
-(D3 still loading — see `d3-in-lwc.md`).
+If the prompt does not need category color, omit the category role rather than
+inventing one. The specs then become item followed by value. Generate
+`VALUE_ALLOWED_AGGREGATIONS` from the confirmed value semantics and formatter.
 
-Redraw on filter change: close any tooltip, clear the SVG, rerun
-`_renderChart`. The simulation is fast enough at 200 dots that a
-full redraw is simpler than animating enter/exit.
+## Verification
 
-## Common surprises
+- Filter redraw preserves category colors.
+- Invalid values cannot reach the simulation.
+- Axis and assistive text use the bound value label and selected formatter.
+- Hover-only information has a keyboard/focus equivalent.
+- Result copy says "up to 200 returned items" rather than claiming a global
+  ranking.
 
-- **All dots pile at X=0.** Amount arriving as strings — coerce with
-  `+d.amount` or `Number(d.amount)` in the row mapper.
-- **Simulation freezes the tab.** Row count too high — cap
-  `registerFieldsForQuery` at `limit: 200` to start. Raise once
-  performance is confirmed.
-- **Legend colors flip between renders.** `scaleOrdinal.domain()` was
-  rebuilt from the new (filtered) row set. Cache the full stage list
-  from the first load and reuse it.
+## DF26 worked example
 
-## See also
-
-- SKILL.md gates: **#7** (registerFieldsForQuery), **#8** (spec order).
-- `references/d3-in-lwc.md` — every rule there applies here.
-- `references/sdm-table.md` — the underlying pipeline this replaces
-  visually (no table markup in beeswarm — the SVG is the whole widget).
+For the canonical prompt "show every opportunity as a dot on an amount axis,
+colored by stage," map item to opportunity ID, category to stage, and value to
+amount. These are example mappings, not defaults.

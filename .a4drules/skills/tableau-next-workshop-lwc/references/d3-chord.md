@@ -1,59 +1,104 @@
-# d3-chord - Circular relationship between opportunity type and stage
+# D3 chord: relationships between two categories
 
-Read `sdk-query-lifecycle.md` and `d3-in-lwc.md` first. This chart is a
-purpose-built aggregate visualization; it replaces the action table.
+Use a chord chart when a prompt asks how values from one categorical role
+relate to values from another, weighted by a measure.
 
-## Query
+## Semantic roles
 
-Query two dimensions and one model-level count calculation, with dimensions
-first:
+| Property | Type | Purpose |
+|---|---|---|
+| `sourceField` | `SemanticDimension` | Source-side category |
+| `targetField` | `SemanticDimension` | Target-side category |
+| `weightField` | `SemanticMeasure` | Ribbon weight |
+
+Map rows to `{ source, target, weight }`. Use each binding's label to prefix
+visible and assistive node names, for example `Origin Region: West` and
+`Destination Region: East`. Raw values alone do not communicate which side a
+node belongs to.
+
+## Matrix rules
+
+- Apply every lifecycle rule in `d3-in-lwc.md`.
+- Query source and target dimensions before the weight measure.
+- Keep source and target node identities distinct even if both contain the
+  same raw value. Use kind-prefixed keys rather than deduplicating raw strings.
+- Initialize a dense square matrix with zeroes.
+- The target index starts after every source node:
+  `sourceValues.length + targetValues.indexOf(row.target)`.
+- For a relationship diagram where both category groups need visible arcs,
+  mirror each weight into both matrix directions. The semantic relationship
+  can remain source-to-target even though geometry is symmetric.
+- Use finite nonnegative weights. Exclude invalid rows and surface a result
+  note.
+- Use flat ribbon fills; shadow-DOM fragment references for gradients are
+  unreliable.
+
+## Core matrix build
+
+```javascript
+const sourceValues = [...new Set(this.rows.map((row) => row.source))];
+const targetValues = [...new Set(this.rows.map((row) => row.target))];
+const nodes = [
+    ...sourceValues.map((value) => ({ kind: 'source', value })),
+    ...targetValues.map((value) => ({ kind: 'target', value }))
+];
+const matrix = nodes.map(() => nodes.map(() => 0));
+
+for (const row of this.rows) {
+    const sourceIndex = sourceValues.indexOf(row.source);
+    const targetIndex = sourceValues.length + targetValues.indexOf(row.target);
+    matrix[sourceIndex][targetIndex] += row.weight;
+    matrix[targetIndex][sourceIndex] += row.weight;
+}
+
+const chords = d3.chord()
+    .padAngle(0.04)
+    .sortSubgroups(d3.descending)(matrix);
+```
+
+Label nodes with role semantics:
+
+```javascript
+const nodeLabel = (node) => {
+    const roleLabel = node.kind === 'source'
+        ? this._labelsByRole.source
+        : this._labelsByRole.target;
+    return `${roleLabel}: ${node.value}`;
+};
+```
+
+Add a visible legend distinguishing source and target roles, an SVG
+title/description, and a textual relationship summary. Do not rely on color or
+arc position alone.
+
+## Query shape
 
 ```javascript
 const specs = [
-    { model: `${OBJ_OPPORTUNITY}.<type-dimension>`, rowGrouping: true },
-    { model: `${OBJ_OPPORTUNITY}.<stage-dimension>`, rowGrouping: true },
-    { model: '<opportunity-count-clc>', rowGrouping: false }
+    { model: this.sourceField.name, rowGrouping: true },
+    { model: this.targetField.name, rowGrouping: true },
+    measureSpecFromBinding(this.weightField, WEIGHT_ALLOWED_AGGREGATIONS)
 ];
+// Row contract: [source, target, weight].
 ```
 
-## Dense Symmetric Matrix
+Generate `WEIGHT_ALLOWED_AGGREGATIONS` from the confirmed relationship weight.
+Count aggregations are valid only when the prompt defines weight as a count.
 
-`d3.chord()` needs a dense square matrix. Type nodes precede stage nodes, so the
-stage index starts after **all type nodes**, not after the count of stages.
-Mirror each count: the semantic relationship remains Type-to-Stage, but the
-symmetric matrix gives both node groups readable nonzero arcs.
+## Verification
 
-```javascript
-const typeValues = [...new Set(this.rows.map((row) => row.type))];
-const stageValues = [...new Set(this.rows.map((row) => row.stage))];
-const nodes = [...typeValues, ...stageValues];
-const matrix = nodes.map(() => nodes.map(() => 0));
+- Unequal source and target cardinalities use `sourceValues.length` as the
+  target offset.
+- Test unequal cardinality explicitly, for example two source values and three
+  target values. Assert a five-by-five matrix and target indexes beginning at
+  two; equal-sized groups can hide an offset bug.
+- Both node groups have nonzero geometry for nonzero relationships.
+- Identical raw values on opposite sides remain distinct nodes.
+- Node labels and textual summaries identify source versus target semantics.
+- Invalid or negative weights do not reach `d3.chord()`.
 
-this.rows.forEach((row) => {
-    const typeIndex = typeValues.indexOf(row.type);
-    const stageIndex = typeValues.length + stageValues.indexOf(row.stage);
-    const count = Number(row.count) || 0;
-    matrix[typeIndex][stageIndex] += count;
-    matrix[stageIndex][typeIndex] += count;
-});
-```
+## DF26 worked example
 
-Use test data with unequal type and stage cardinalities. Equal counts can hide
-the original offset bug.
-
-## Accessible Semantics
-
-The diagram needs a complete textual equivalent and cannot rely on arc color to
-distinguish Type from Stage. Give the SVG a title and description, then provide
-visible or equivalent text identifying the two categories. A legend and
-kind-prefixed labels are one clear implementation:
-
-```javascript
-svg.attr('role', 'img').attr('aria-labelledby', 'chord-title chord-description');
-svg.append('title').attr('id', 'chord-title').text('Opportunity type and stage relationships');
-svg.append('desc').attr('id', 'chord-description').text('Ribbon widths show returned opportunity counts between opportunity types and stages.');
-// Label: `Opportunity Type: ${value}` or `Opportunity Stage: ${value}`.
-```
-
-Use flat fills and labels flipped at the arc midpoint for legibility. See
-`d3-in-lwc.md` for manual DOM, resize, and D3 lifecycle rules.
+For "show how opportunity type relates to stage," map source to opportunity
+type, target to stage, and weight to opportunity count. Those field meanings
+are example mappings only.

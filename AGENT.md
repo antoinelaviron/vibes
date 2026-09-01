@@ -15,14 +15,16 @@ Before writing any code, load and follow these skills (in `.a4drules/skills/`):
 
 1. **`tableau-next-workshop-lwc`** — for anything involving the LWCs
    (`vibeTable`, `vibeInsight`, `vibeAction`), the Tableau Next SDK,
-   Apex-backed insights, or the Log a Call action. The skill ships
+   Apex-backed insights, or Salesforce record actions. The skill ships
    pattern references under `references/` — read the one that matches
    the current build, then author the LWC from the attendee's prompt.
 
-2. **`tableau-next-workshop-sdm-discovery`** — for anything involving the
-   Semantic Data Model: finding the SDM, listing fields, mapping fuzzy
-   attendee terms ("amount", "account") to real API names, and choosing
-   between `table_field` and `semantic_field` wire shapes.
+2. **`tableau-next-workshop-sdm-discovery`** — for hard-coded fallback
+   builds and SDM diagnostics: finding the SDM, listing fields, mapping
+   fuzzy attendee terms ("amount", "account") to real API names, and
+   choosing between object-scoped and model-scoped field shapes. The
+   default workshop path uses native data binding, so dashboard authors
+   map semantic roles after deployment instead of baking API names into JS.
 
 A third skill, **`tableau-semantic-query-api`**, is a helper invoked by
 `tableau-next-workshop-lwc` (see its `references/smoke-test-query.md`) to
@@ -37,7 +39,7 @@ FIRST, then act:
 - "vibeTable", "vibeInsight", "vibeAction", "vibeChart", "vibeChord",
   "vibeSparkline", "vibeSearch", "vibeKanban", "vibeTheme", "vibeVideo"
 - "analytics__Dashboard", "semantic model", "SDM"
-- "top opportunities", "Insight button", "Log a Call"
+- "top opportunities", "Insight button", "Log a Call", "record action"
 - "Build 1", "Build 2", "Build 3"
 - "sparkline", "Kanban", "video tile", "chord diagram", "D3 chart"
 
@@ -47,13 +49,16 @@ FIRST, then act:
   target does not exist. The correct value is `<target>analytics__Dashboard</target>`.
 - **Do NOT fall back to `lightning__AppPage`** if the analytics target
   errors. That produces an App Builder page, not a Tableau widget.
-- **Do NOT use `fetchDataUsingQueryAndSource`** — it sends `queryJson`
-  verbatim to the semantic engine, so dashboard filters and parameters
-  never flow into the query. Use `registerFieldsForQuery` — it lets the
-  dashboard runtime own the query and re-fires it with filter context
-  on every change. See the LWC skill's Gate #7.
+- **Do NOT use `fetchDataUsingQueryAndSource` just because fields are data
+  bound** — data binding supplies the source and field roles; it does not
+  require a one-off query. Translate bound properties into
+  `registerFieldsForQuery` specs so dashboard filters and parameters flow
+  into the runtime-owned query. See the LWC skill's "Critical SDK and UI
+  gates" section.
 - **Do NOT call `aiplatform.ModelsAPI` from JavaScript.** Always via an
-  `@AuraEnabled` Apex method. Trust Layer routing is mandatory.
+  `@AuraEnabled` Apex method. `RecordInsightGenerator` is the pre-baked,
+  pre-deployed workshop head-start class; attendees call it but do not build or
+  modify it. Trust Layer routing is mandatory.
 - **Do NOT use `NavigationMixin`** for Salesforce navigation from within
   the extension — it silently fails inside `*--analytics.<domain>`. Use
   `window.open` with a validated, origin-rewritten URL.
@@ -75,10 +80,22 @@ was written after the workshop team hit each of these traps.
   the pre-baked Apex class and waste time.
 - **Class naming**: PascalCase (`VibeTable`), files camelCase
   (`vibeTable.js`), `<masterLabel>` title-case with space (`Vibe Table`).
+- **Native data-binding metadata**: use API version 67.0 and
+  role-oriented `SemanticModel`, `SemanticDimension`, and `SemanticMeasure`
+  properties under `<targetConfig targets="analytics__Dashboard">`.
+- **Binding compatibility**: property names and types are persisted in
+  dashboards. Never rename, remove, or repurpose a shipped binding property;
+  add a new optional property or a new component bundle instead.
 - **Canonical knowledge**: `SKILL.md` routes the work. Read
-  `references/sdk-query-lifecycle.md` for every data-backed component, then
-  load the feature-specific reference. Do not treat `IMPROVEMENTS.md` as a
-  second source of implementation code.
+  `references/sdm-data-binding.md` and `references/sdk-query-lifecycle.md` for
+  every data-backed component, then load the feature-specific reference. The
+  two lifecycle references encode the same August 31 live-gated contract. Do
+  not treat `IMPROVEMENTS.md` as a second source of implementation code.
+- **SDK startup**: use setter-scheduled one-shot startup from private-backed
+  `@api` accessors plus `connectedCallback`. Never initiate or synchronize a
+  query from `renderedCallback`; never hydrate with `getDataSource/getJson`,
+  compute binding signatures, or rebind in place. Remount after a material
+  mapping change.
 
 ## Attendee UX rule
 
@@ -86,6 +103,13 @@ Every build should feel like the attendee's prompt authored the code.
 Do NOT copy a reference verbatim and present it as "here you go." Read
 the reference to know what shape works, then generate the file from
 the attendee's prompt, matching that shape.
+
+Before Build 1, derive and confirm a semantic role contract from the prompt:
+entity labels, property names and types, visible and hidden roles, display
+order, formatting, sorting, insight context, and requested interactions.
+Builds 2 and 3 inherit that contract unchanged and add only their requested
+feature. Opportunity, Account, Amount, and Log a Call are the canonical DF26
+worked example, not universal component defaults.
 
 ## When in doubt
 

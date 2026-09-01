@@ -72,7 +72,7 @@ success).
 - **`structuredSemanticQuery`** is the top-level wrapper. Not `semanticQuery`,
   not `query`, not omitted. Getting this wrong = `JSON_PARSER_ERROR`.
 - **`semanticModelId`** is the **record ID** (starts with `2SM…`), NOT the
-  apiName. Use `GET /services/data/v66.0/ssot/semantic/models/{apiName}` to
+  apiName. Use `GET /services/data/v67.0/ssot/semantic/models/{apiName}` to
   resolve apiName → id.
 - **Alternative to `semanticModelId`**: pass the full `semanticModel` object
   inline. Useful for on-the-fly queries. See references for shape.
@@ -148,7 +148,7 @@ export SF_INSTANCE=$(sf org display --target-org $SF_ORG --json | jq -r '.result
 
 SDM_APINAME="Sales_Cloud_00Dfj00000VRQK1EAP"
 SDM_ID=$(curl -s -H "Authorization: Bearer $SF_TOKEN" \
-  "$SF_INSTANCE/services/data/v66.0/ssot/semantic/models/$SDM_APINAME" \
+  "$SF_INSTANCE/services/data/v67.0/ssot/semantic/models/$SDM_APINAME" \
   | jq -r '.id')
 echo "SDM ID: $SDM_ID"
 ```

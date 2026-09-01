@@ -1,284 +1,279 @@
-# sdk-query-lifecycle - Tableau SDK startup, refresh, and reconnect pattern
+# SDK query lifecycle
 
-Use this reference for every data-backed workshop extension. It is the single
-authority for SDK lifecycle code; `sdm-table.md` and chart references own only
-their query and rendering details.
+Use this reference for every data-backed workshop extension. It is
+contract-equivalent to `sdm-data-binding.md`: that reference owns prompt-derived
+role compilation, while this one isolates the live-proven startup and query
+lifecycle.
 
-## Contents
+Fourteen native-binding bundles passed automated verification, deployment, and
+live Tableau Next dashboard testing in `26213playground` on August 31, 2026.
+The validated default is setter-scheduled one-shot startup. Do not replace it
+with discovery-first code, source hydration, rendered query startup, or dynamic
+rebinding.
 
-- [Invariant order](#invariant-order)
-- [Canonical component pattern](#canonical-component-pattern)
-- [Filter and parameter signals](#filter-and-parameter-signals)
-- [Disconnect and reconnect](#disconnect-and-reconnect)
-- [Failure states](#failure-states)
+## Invariants
 
-## Invariant Order
+1. Use source API version `67.0` and target `analytics__Dashboard`.
+2. Generate private-backed `@api` accessors for `sdk`, `sdmName`, and every
+   prompt-derived semantic role. Every setter calls `_scheduleStart()`.
+3. `connectedCallback()` marks the instance connected and calls
+   `_scheduleStart()`.
+4. Never initiate or synchronize a query from `renderedCallback`. It remains
+   valid for DOM-only work such as focus transfer or D3 rendering.
+5. Start once after the component is connected and all required mappings exist.
+6. Do not call `getDataSource()` or `getJson()` in this lifecycle. Do not build
+   binding signatures, registration generations, or in-place rebinding logic.
+7. A materially changed model or role mapping requires the dashboard runtime to
+   remount the component.
+8. Register every dimension before every measure and derive row indexes from
+   that final order.
+9. Subscribe to `dataUpdate` before `registerFieldsForQuery` because
+   registration may emit synchronously.
+10. Call `registerFieldsForQuery(specs, sourceName, { limit: QUERY_LIMIT })`.
+    The registered query owns fetching and dashboard filter/parameter refresh.
+11. Accept direct row payloads and wrappers shaped as `{ rows: [...] }` or
+    `{ data: [...] }`.
+12. End an initial or refresh wait with `loaded`, `nodata`, or a visible `error`.
+    Use an eight-second terminal timeout.
 
-`registerFieldsForQuery` is the dashboard-aware query path. Keep this sequence:
+## API setters and one-shot scheduling
 
-```text
-1. registerDataSource(sourceName)
-2. bounded source hydration attempt
-3. notifyLifecycleChange('init')
-4. subscribe to SDK events
-5. set loading state and install timeout
-6. registerFieldsForQuery(specs, sourceName, { limit })
-```
-
-Hydration is a warning-only warmup. Start it after source registration, wait no
-longer than its small budget, and continue after timeout or rejection. A pending
-`getDataSource()` must not leave the tile permanently initializing. Subscribe
-and set loading before registration because `dataUpdate` may arrive
-synchronously from registration.
-
-`DATA_UPDATE` is the only path that mutates rows. Do not call `fetchData()`
-explicitly after registration or from filter/parameter events.
-
-## Canonical Component Pattern
-
-Replace every placeholder from live discovery. Keep dimensions before measures
-and keep `IDX` in the SDK's dimensions-then-measures return order.
+The runtime can assign `sdk`, model, and role bindings before or after
+`connectedCallback`. Route every assignment through the same microtask. The
+guards collapse multiple assignments into one startup attempt and prevent
+duplicate registration.
 
 ```javascript
-import { LightningElement, api, track } from 'lwc';
+@api
+get sdk() { return this._sdk; }
+set sdk(value) {
+    this._sdk = value;
+    this._scheduleStart();
+}
 
-const SDK_EVENTS = {
-    DATA_UPDATE: 'dataUpdate',
-    FILTER_CHANGE: 'filterChange',
-    PARAMETER_CHANGE: 'parameterChange'
-};
-const LIFE_CYCLE = { INIT: 'init', LOADED: 'loaded', ERROR: 'error', NO_DATA: 'nodata' };
-const HYDRATION_TIMEOUT_MS = 250;
+@api
+get sdmName() { return this._sdmName; }
+set sdmName(value) {
+    this._sdmName = value;
+    this._scheduleStart();
+}
+
+@api
+get primaryLabelField() { return this._primaryLabelField; }
+set primaryLabelField(value) {
+    this._primaryLabelField = value;
+    this._scheduleStart();
+}
+
+connectedCallback() {
+    this._connected = true;
+    this._scheduleStart();
+}
+
+_scheduleStart() {
+    if (this._startScheduled) return;
+    this._startScheduled = true;
+    Promise.resolve().then(() => {
+        this._startScheduled = false;
+        this._tryStart();
+    });
+}
+```
+
+Generate one static accessor per confirmed role. Do not create dynamic `@api`
+properties. Do not use `renderedCallback` as an injection retry loop.
+
+## Query construction
+
+Read the runtime objects directly:
+
+```javascript
+// SemanticModel
+{ apiName: 'Model_Api_Name', id: '2SM...', label: 'Model label' }
+
+// SemanticDimension
+{ name: 'Object.Field', label: 'Field label' }
+
+// SemanticMeasure
+{ name: 'Object.Field', aggregation: 'Sum', label: 'Field label' }
+```
+
+Normalize selected measure aggregations to uppercase SDK enums: `SUM`, `AVG`,
+`MIN`, `MAX`, `COUNT`, and `COUNT_DISTINCT`. For a qualified raw measure,
+include its validated `aggregationType`. For a bare model-level calculated
+measure, omit `aggregationType` because the semantic model owns aggregation.
+
+Build the active prompt-derived roles with dimensions first and measures last:
+
+```javascript
+const orderedRoles = [
+    ...mappedRoles.filter((role) => role.kind === 'dimension'),
+    ...mappedRoles.filter((role) => role.kind === 'measure')
+];
+const specs = orderedRoles.map((role) =>
+    role.kind === 'dimension'
+        ? { model: role.binding.name, rowGrouping: true }
+        : measureSpecFromBinding(role.binding, role.allowedAggregations)
+);
+this._orderedRoles = orderedRoles;
+this._indexByRole = Object.fromEntries(
+    orderedRoles.map((role, index) => [role.key, index])
+);
+```
+
+The exact final order is the positional row contract. Never interleave measures
+with dimensions, even when the visible display order differs.
+
+## Canonical startup
+
+Incomplete required mappings are an authoring state: show configuration
+guidance and issue no query. Set `_started` before SDK calls. Start loading
+before registration so a synchronous update remains final. Use `_showError` to
+clear the timer, expose an error message, stop loading, and emit the `error`
+lifecycle event.
+
+```javascript
+const QUERY_LIMIT = 5000;
 const LOADING_TIMEOUT_MS = 8000;
-const TIMEOUT_MESSAGE = 'Data refresh timed out';
 
-export default class ExampleExtension extends LightningElement {
-    @api sdk;
-    @track rows = [];
-    @track _isLoading = true;
-    @track _hasError = false;
-    @track _errorMessage = '';
+_tryStart() {
+    if (this._started || !this._connected || !this.sdk) return;
 
-    _connected = false;
-    _pipelineStarted = false;
-    _pipelineGeneration = 0;
-    _isQueryRegistered = false;
-    _unsubscribes = [];
-    _loadingTimer = null;
-
-    connectedCallback() {
-        this._connected = true;
-        this._tryStartPipeline();
+    const sourceName = this.sdmName?.apiName;
+    const activeRoles = ROLE_DEFINITIONS.map((role) => ({
+        ...role,
+        binding: this[role.propertyName]
+    }));
+    const missingRequiredRole = activeRoles.some(
+        (role) => role.required && !role.binding?.name
+    );
+    if (!sourceName || missingRequiredRole) {
+        this._showConfigurationMessage();
+        return;
     }
+    const mappedRoles = activeRoles.filter((role) => role.binding?.name);
 
-    renderedCallback() {
-        this._tryStartPipeline(); // sdk is injected after connectedCallback.
+    this._started = true;
+    this._setLoadingState();
+    try {
+        const specs = this._buildQuerySpecs(mappedRoles);
+        this.sdk.registerDataSource(sourceName);
+        this._unsubscribes = [
+            this.sdk.on('dataUpdate', (payload) =>
+                this._handleDataUpdate(payload)
+            )
+        ];
+        this.sdk.actions?.notifyLifecycleChange?.('init');
+        this._loadingTimer = setTimeout(() => {
+            this._showError('No data update was received within 8 seconds.');
+        }, LOADING_TIMEOUT_MS);
+        this.sdk.registerFieldsForQuery(specs, sourceName, {
+            limit: QUERY_LIMIT
+        });
+    } catch (error) {
+        this._showError(String(error?.message || error));
     }
+}
 
-    disconnectedCallback() {
-        this._connected = false;
-        this._pipelineGeneration += 1;
-        this._pipelineStarted = false;
-        this._isQueryRegistered = false;
-        this.rows = [];
-        this._clearLoadingTimer();
-        this._unsubscribes.forEach((unsubscribe) => unsubscribe?.());
-        this._unsubscribes = [];
-    }
-
-    _tryStartPipeline() {
-        if (this._pipelineStarted || !this.sdk) return;
-        this._pipelineStarted = true;
-        const generation = ++this._pipelineGeneration;
-        this._runPipeline(generation);
-    }
-
-    _isCurrentPipeline(generation) {
-        return this._connected && generation === this._pipelineGeneration;
-    }
-
-    async _runPipeline(generation) {
-        try {
-            this.sdk.registerDataSource(SOURCE_NAME);
-            await this._hydrateSource(SOURCE_NAME, generation);
-            if (!this._isCurrentPipeline(generation)) return;
-
-            this.sdk.actions?.notifyLifecycleChange?.(LIFE_CYCLE.INIT);
-            const specs = this._buildSpecs();
-            this._subscribeEvents(generation);
-            if (!this._isCurrentPipeline(generation)) return;
-
-            this._setLoadingState(generation);
-            // dataUpdate can arrive synchronously from registration, so mark the
-            // query active after loading starts but before registering it.
-            this._isQueryRegistered = true;
-            this.sdk.registerFieldsForQuery(specs, SOURCE_NAME, { limit: QUERY_LIMIT });
-        } catch (error) {
-            if (this._isCurrentPipeline(generation)) {
-                this._isQueryRegistered = false;
-                this._setTerminalError(error);
-            }
-        }
-    }
-
-    async _hydrateSource(sourceName, generation) {
-        let timer;
-        try {
-            const hydration = Promise.resolve(this.sdk.getDataSource?.(sourceName))
-                .then((source) => source?.getJson?.());
-            const timeout = new Promise((resolve) => {
-                timer = setTimeout(resolve, HYDRATION_TIMEOUT_MS);
-            });
-            await Promise.race([hydration, timeout]);
-        } catch (error) {
-            console.warn('[extension] source hydration warning:', error);
-        } finally {
-            clearTimeout(timer);
-        }
-    }
+_showError(message) {
+    clearTimeout(this._loadingTimer);
+    this._isLoading = false;
+    this._hasError = true;
+    this._errorMessage = message;
+    this.sdk.actions?.notifyLifecycleChange?.('error', { message });
 }
 ```
 
-Finish the pattern with these lifecycle methods. Keep SDK event callbacks and
-timers generation-aware so late work from a disconnected instance cannot mutate
-a reconnected tile.
+`_buildQuerySpecs(mappedRoles)` must derive `orderedRoles`, indexes, labels, and
+specs only from those mapped roles. It must preserve every mapped dimension
+before every mapped measure and pass each measure's `allowedAggregations` to
+`measureSpecFromBinding`. An unmapped optional role does not block startup or
+occupy a returned-row index.
+
+`registerFieldsForQuery` fetches internally. Never call `fetchData()` after
+registration or from filter and parameter handlers. Add filter or parameter
+subscriptions only when a requested feature must invalidate local UI state;
+rows still change only through `dataUpdate`.
+
+## Data updates and terminal states
+
+Normalize the event envelope before row mapping:
 
 ```javascript
-_subscribeEvents(generation) {
-    if (typeof this.sdk.on !== 'function') return;
-    this._unsubscribes.push(
-        this.sdk.on(SDK_EVENTS.DATA_UPDATE, (raw) => {
-            if (this._isCurrentPipeline(generation)) this._handleDataUpdate(raw, generation);
-        }),
-        this.sdk.on(SDK_EVENTS.FILTER_CHANGE, (payload) => {
-            if (
-                this._isCurrentPipeline(generation) &&
-                this._isQueryRegistered &&
-                this._isRelevantFilterChange(payload)
-            ) {
-                this._setLoadingState(generation);
-            }
-        }),
-        this.sdk.on(SDK_EVENTS.PARAMETER_CHANGE, () => {
-            if (this._isCurrentPipeline(generation) && this._isQueryRegistered) {
-                this._setLoadingState(generation);
-            }
-        })
-    );
+function eventRows(payload) {
+    if (payload && typeof payload === 'object') {
+        if (payload.rows !== undefined) return payload.rows;
+        if (payload.data !== undefined) return payload.data;
+    }
+    return payload;
 }
 
-_handleDataUpdate(raw, generation) {
-    if (!this._isCurrentPipeline(generation)) return;
-    this._clearLoadingTimer();
-    const mapped = this._mapRows(raw == null ? [] : raw);
-    this.rows = mapped;
+_handleDataUpdate(payload) {
+    clearTimeout(this._loadingTimer);
+    const rawRows = eventRows(payload);
+    const rows = Array.from(rawRows || [], (row, index) =>
+        this._mapRow(row, index)
+    );
+    const sortedRows = rows.sort(this._compareRows);
+    this.rows = DISPLAY_LIMIT === null
+        ? sortedRows
+        : sortedRows.slice(0, DISPLAY_LIMIT);
     this._isLoading = false;
     this._hasError = false;
     this.sdk.actions?.notifyLifecycleChange?.(
-        mapped.length ? LIFE_CYCLE.LOADED : LIFE_CYCLE.NO_DATA
+        this.rows.length ? 'loaded' : 'nodata'
     );
 }
-
-_setLoadingState(generation) {
-    this.rows = [];
-    this._isLoading = true;
-    this._hasError = false;
-    this._errorMessage = '';
-    this._clearLoadingTimer();
-    this._loadingTimer = setTimeout(() => {
-        if (this._isCurrentPipeline(generation) && this._isLoading) {
-            this._setTerminalError(new Error(TIMEOUT_MESSAGE), TIMEOUT_MESSAGE);
-        }
-    }, LOADING_TIMEOUT_MS);
-}
-
-_setTerminalError(error, publicMessage = 'Unable to load data. Please try again.') {
-    this._clearLoadingTimer();
-    console.error('[extension] data query failed:', error);
-    this._isLoading = false;
-    this._hasError = true;
-    this._errorMessage = publicMessage;
-    this.sdk.actions?.notifyLifecycleChange?.(LIFE_CYCLE.ERROR, {
-        message: this._errorMessage
-    });
-}
-
-_clearLoadingTimer() {
-    if (this._loadingTimer) clearTimeout(this._loadingTimer);
-    this._loadingTimer = null;
-}
 ```
 
-## Filter And Parameter Signals
+The eight-second timeout must render a visible error and emit `error`; it must
+not silently stop loading. For tables, clear it on every accepted update. For
+D3, keep it active until no-data, successful visual render, or error as described
+in `d3-in-lwc.md`. Always clear it on query failure and disconnect. Use a
+distinct no-data state.
 
-Filter and parameter events are UI signals only. The dashboard runtime refetches
-the registered query and later sends `dataUpdate`.
+Client sorting applies only within rows already returned by the limited query.
+Do not claim a global top-N unless server-side measure ordering has been proved.
+Keep query and display limits separate, and omit `slice()` when every returned
+row should render.
 
-When a filter payload clearly identifies an unrelated object or model, ignoring
-it avoids clearing a tile that will not receive an update. This is a best-effort
-UX optimization, not query correctness: unknown or missing payload structures
-must be treated as relevant. Build the relevance set from the query's objects
-and model-level measures. A filter on a non-projected field of a queried object
-can still affect results, so do not match only the exact specs.
+## Disconnect and remount
 
 ```javascript
-_isRelevantFilterChange(payload) {
-    const models = this._collectFilterModels(payload);
-    if (!models.length) return true;
-    return models.some((model) => {
-        if (!model.includes('.') && model !== OBJ_OPPORTUNITY && model !== OBJ_ACCOUNT) {
-            // A bare field name cannot identify its object reliably.
-            return true;
-        }
-        return (
-            model === OBJ_OPPORTUNITY ||
-            model === OBJ_ACCOUNT ||
-            model.startsWith(`${OBJ_OPPORTUNITY}.`) ||
-            model.startsWith(`${OBJ_ACCOUNT}.`) ||
-            model === 'Total_Amount_clc'
-        );
-    });
-}
-
-_collectFilterModels(payload) {
-    const models = [];
-    const visit = (value, key = '') => {
-        if (typeof value === 'string') {
-            if (/^(model|field|fieldName|measure|source|object)$/i.test(key)) {
-                models.push(value);
-            }
-            return;
-        }
-        if (Array.isArray(value)) {
-            value.forEach((item) => visit(item, key));
-            return;
-        }
-        if (value && typeof value === 'object') {
-            Object.entries(value).forEach(([childKey, childValue]) => visit(childValue, childKey));
-        }
-    };
-    visit(payload);
-    return models;
+disconnectedCallback() {
+    this._connected = false;
+    this._started = false;
+    this.rows = [];
+    this._orderedRoles = [];
+    this._indexByRole = {};
+    this._labelsByRole = {};
+    this._isLoading = false;
+    this._hasData = false;
+    this._hasNoData = false;
+    this._hasError = false;
+    this._errorMessage = '';
+    this._unsubscribes.forEach((unsubscribe) => unsubscribe?.());
+    this._unsubscribes = [];
+    clearTimeout(this._loadingTimer);
+    this._loadingTimer = null;
+    this._invalidateFeatureState();
 }
 ```
 
-Use a query-specific relevance set. For example, a chord query that uses
-`Number_of_Opportunities_clc` must include that model-level measure.
+Disconnect cleanup removes subscriptions, timers, stale rows or visual buffers,
+and pending feature state. A later connection can use the same setter-scheduled
+startup path. Do not attempt to compare binding signatures or re-register while
+the old query can still emit unattributed `dataUpdate` events. Material mapping
+changes require a remount.
 
-## Disconnect And Reconnect
+## Verification
 
-Resetting only subscriptions is insufficient: `_pipelineStarted` would otherwise
-block a reconnected component forever. Disconnect must invalidate asynchronous
-continuations, reset query registration, clear timers and buffered state, and
-allow `renderedCallback` to start a new generation. D3 components add their
-own script-load, render, and resize cleanup in `d3-in-lwc.md`.
-
-## Failure States
-
-- `init` marks setup only. Do not emit it after the component starts loading;
-  the dashboard does not publish ready for this state.
-- `loaded`, `nodata`, and `error` are terminal lifecycle outcomes and publish
-  component readiness.
-- An absent initial `dataUpdate` must become a visible error, not a blank tile
-  or an indefinitely spinning indicator.
-- Do not replace a terminal D3 error with later hydration or SDK callbacks.
+1. Delayed `sdk`, model, and role assignment produces exactly one registration.
+2. No query starts from `renderedCallback`.
+3. No `getDataSource`, `getJson`, binding signature, or in-place rebind exists.
+4. Dimensions precede measures and uppercase aggregations are used.
+5. `dataUpdate` is subscribed before registration and accepts direct, `rows`,
+   and `data` payloads.
+6. Missing initial data reaches a visible terminal error after eight seconds.
+7. Dashboard filters update rows without explicit fetching.
+8. Client-sorted copy describes the returned set, not unsupported global top-N.

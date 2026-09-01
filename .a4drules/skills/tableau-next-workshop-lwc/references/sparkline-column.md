@@ -1,54 +1,137 @@
-# sparkline-column - Inline trend visual in a table row
+# Per-row D3 sparkline column
 
-Read `sdk-query-lifecycle.md`, `sdm-table.md`, and `d3-in-lwc.md` first. This
-pattern preserves the `vibeAction` table and renders an inline SVG per row.
+Use a sparkline column when each table row needs a compact numeric trend. This
+composes the role-derived table with `d3-in-lwc.md`; it does not replace either
+contract.
 
-## Rendering
+## Contents
 
-Render after the table DOM exists, usually from `renderedCallback`. Mark each
-manual-DOM cell with `data-row-key` and only redraw when its row key or trend
-values changed. Fixed compact dimensions are appropriate for a table sparkline.
+- [Choose a data mode](#choose-a-data-mode)
+- [Rendering rules](#rendering-rules)
+- [Idempotent draw](#idempotent-draw)
+- [Template](#template)
+- [Verification](#verification)
 
-```html
-<td>
-  <span class="slds-assistive-text">{row.trendDescription}</span>
-  <div class="spark-cell" data-row-key={row.rowKey} lwc:dom="manual" aria-hidden="true"></div>
-</td>
-```
+## Choose a data mode
 
-The assistive text is required because the SVG is decorative. Clear imperative
-cell content when its data changes and follow `d3-in-lwc.md` for D3 loading and
-disconnect cleanup.
+### Real series
 
-## Real Trend Data
+Require these semantic roles:
 
-When the semantic model supplies a repeated measure, JSON field, or rollups,
-normalize that source into `row.trend`. Describe the actual series in
-`trendDescription`; do not label it synthetic.
+| Property | Type | Purpose |
+|---|---|---|
+| `entityField` | `SemanticDimension` | Groups points into one table row |
+| `periodField` | `SemanticDimension` | Orders points within each trend |
+| `valueField` | `SemanticMeasure` | Sparkline value |
 
-## Synthetic Workshop Demo Mode
+Query both dimensions before the measure, map to `{ entity, period, value }`,
+sort periods using the prompt-confirmed order, and group points into
+`row.trend`.
 
-The workshop menu can demonstrate a 12-point trend without a historical series.
-In that mode, disclose that it is simulated, generate it deterministically from
-the stable Opportunity ID plus current amount, and end the series at the current
-amount. Never seed from row index or `Math.random()`, because sorting and refresh
-would redraw a different history.
+### Synthetic workshop demo
+
+Use synthetic mode only when the attendee explicitly asks for a visual demo
+without historical data. Derive a deterministic sequence from a stable row
+identity plus the current endpoint value. Never use query index or
+`Math.random()`.
+
+Require visible column text such as `Simulated 12-point demo trend` and per-row
+assistive text stating that values are simulated from the current value, not
+historical observations. The point count comes from the prompt; 12 is not a
+universal default.
+
+## Rendering rules
+
+- Apply every applicable lifecycle rule in `d3-in-lwc.md` per row.
+- Draw after the `for:each` DOM exists in `renderedCallback`.
+- Use `lwc:dom="manual"` and `data-row-key` on every spark container.
+- Track a trend signature, not only the row key. A filter can change trend
+  values while preserving identity.
+- Keep the SVG compact and decorative. Put its complete meaning in adjacent
+  per-row assistive text. In synthetic mode, also render the required disclosure
+  visibly in the column header or caption.
+- Place the concise assistive summary immediately before the decorative
+  sparkline in the same table cell so reading order matches visual placement.
+- Do not add axes or hover-only tooltips. If more detail is needed, use a full
+  chart.
+
+## Idempotent draw
 
 ```javascript
-_seededTrend(opportunityId, amount) {
-    const seedText = `${opportunityId || 'missing'}:${amount || 0}`;
-    let seed = [...seedText].reduce((value, character) => ((value * 31) + character.charCodeAt(0)) >>> 0, 2166136261);
-    const next = () => {
-        seed = (seed * 1664525 + 1013904223) >>> 0;
-        return seed / 4294967296;
-    };
-    const endpoint = Number(amount) || 0;
-    return Array.from({ length: 12 }, (_, index) => {
-        if (index === 11) return endpoint;
-        return Math.max(0, Math.round(endpoint * (0.55 + next() * 0.4)));
+_drawSparklines() {
+    const cells = this.template.querySelectorAll('.spark-cell');
+    cells.forEach((cell) => {
+        const row = this.rows.find(
+            (candidate) => candidate.rowKey === cell.dataset.rowKey
+        );
+        const values = Array.isArray(row?.trend)
+            ? row.trend.filter((value) => Number.isFinite(value))
+            : [];
+        if (!values.length) {
+            cell.innerHTML = '';
+            delete cell.dataset.trendSignature;
+            return;
+        }
+
+        const signature = JSON.stringify(values);
+        if (cell.dataset.trendSignature === signature) return;
+        this._drawSparkline(cell, values);
+        cell.dataset.trendSignature = signature;
     });
+}
+
+_drawSparkline(container, values) {
+    container.innerHTML = '';
+    const d3 = this._d3;
+    const width = 120;
+    const height = 24;
+    const padding = 2;
+    const min = Math.min(0, ...values);
+    const max = Math.max(0, ...values);
+    const barWidth = (width - padding * 2) / values.length;
+    const y = d3.scaleLinear()
+        .domain(min === max ? [min - 1, max + 1] : [min, max])
+        .range([height - padding, padding]);
+    const baseline = y(0);
+
+    const svg = d3.select(container)
+        .append('svg')
+        .attr('width', width)
+        .attr('height', height)
+        .attr('aria-hidden', 'true');
+    svg.selectAll('rect')
+        .data(values)
+        .enter()
+        .append('rect')
+        .attr('x', (value, index) => padding + index * barWidth)
+        .attr('y', (value) => Math.min(y(value), baseline))
+        .attr('width', Math.max(1, barWidth - 1))
+        .attr('height', (value) => Math.max(1, Math.abs(y(value) - baseline)))
+        .attr('fill', 'currentColor');
 }
 ```
 
-Use visible copy such as `Simulated 12-point demo trend` and per-row assistive
-text such as `Simulated trend ending at $5,000; values are not historical data.`
+## Template
+
+```html
+<th scope="col">{trendColumnLabel}</th>
+<!-- Per row: -->
+<td>
+  <span class="slds-assistive-text">{row.trendAccessibleSummary}</span>
+  <div
+    class="spark-cell"
+    data-row-key={row.rowKey}
+    lwc:dom="manual"
+    aria-hidden="true"
+  ></div>
+</td>
+```
+
+## Verification
+
+- Real points sort by the confirmed period semantics.
+- Changed values redraw even when `rowKey` is unchanged.
+- Synthetic values are deterministic and end at the current value.
+- Synthetic disclosure is visible and included in each row's assistive text.
+- Decorative SVGs are hidden from assistive technology; equivalent summaries
+  remain available.

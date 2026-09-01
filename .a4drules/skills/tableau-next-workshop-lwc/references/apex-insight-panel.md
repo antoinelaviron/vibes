@@ -1,156 +1,307 @@
-# apex-insight-panel - Per-row AI narrative (Build 2)
+# Prompt-derived per-row insight panel
 
-Read this with `sdk-query-lifecycle.md` after reading the attendee's deployed
-`vibeTable`. Preserve its query and `IDX` map in a new `vibeInsight` bundle.
+Use this Build 2 pattern to add an Apex-backed narrative without replacing or
+reinterpreting Build 1's semantic roles. The widget swaps between its data
+surface and an inline insight panel; it never attempts an iframe modal.
 
-## Apex Contract
+`RecordInsightGenerator` is a pre-baked, pre-deployed workshop head-start
+class. The attendee's task is to call it from the LWC, not to create, edit, or
+deploy Apex.
 
-Read `force-app/main/default/classes/OpportunityInsightGenerator.cls` before
-writing the import. In this workshop it exposes:
+## Contents
+
+- [Rules](#rules)
+- [Contract compiled from the prompt](#contract-compiled-from-the-prompt)
+- [State and payload](#state-and-payload)
+- [Complete request-token pattern](#complete-request-token-pattern)
+- [Focus transfer](#focus-transfer)
+- [Template shape](#template-shape)
+- [Verification](#verification)
+
+## Rules
+
+- Read `force-app/main/default/classes/RecordInsightGenerator.cls` before
+  generating the import. Mirror its exact `@AuraEnabled` method and named
+  parameter.
+- Route model calls through Apex. Never call `aiplatform.ModelsAPI` from JS.
+- Preserve every Build 1 property name, type, requiredness, purpose, query role,
+  display format, and row key.
+- Derive the entity label, subject role, insight goal, and context roles from
+  the confirmed prompt contract.
+- Send only selected context roles. Hidden IDs are excluded unless the prompt
+  explicitly makes one relevant to the narrative.
+- Invalidate pending work when the panel closes, another row is selected, data
+  refreshes, bindings change, or the component disconnects.
+- Move focus to the Back control after opening and intentionally restore it to
+  the triggering row control after a user-initiated close when that row still
+  exists. If it disappeared, focus a persistent widget target.
+- Put the Back control at top-left; Tableau Next reserves the widget's top-right
+  area for platform hover chrome.
+- Render user-safe errors and statuses inside the widget. Log technical details
+  separately; `ShowToastEvent` is silently dropped by dashboard extensions.
+- Use non-empty, prompt-derived accessible labels. Generic "Insight" text alone
+  does not identify the affected row.
+- `renderedCallback` may move focus only. It must never start, register,
+  synchronize, or rebind a query.
+
+## Contract compiled from the prompt
+
+Build 2 inherits Build 1's roles and adds an insight descriptor:
 
 ```javascript
-import generateInsight from '@salesforce/apex/OpportunityInsightGenerator.generateInsight';
+const INSIGHT_CONTRACT = {
+    entitySingularLabel: 'Case',
+    entityPluralLabel: 'Cases',
+    subjectRoleKey: 'caseNumber',
+    contextRoleKeys: [
+        'caseNumber', 'customerName', 'priority', 'status', 'ownerName', 'ageDays'
+    ],
+    goal: 'Explain the case status and suggest one supported next action.'
+};
 ```
 
-Call it with its named `rowJson` parameter. Do not call the Models API in
-browser code. The pre-baked class returns a bounded user-safe fallback; surface
-that text in the widget instead of using `ShowToastEvent`, which is dropped by
-dashboard extensions.
+The Case values demonstrate shape only. Generate this constant from the actual
+attendee prompt and inherited role keys.
 
-## Request Ownership
-
-An Apex promise may settle after the user selects another row, closes the panel,
-the dashboard refreshes, or the component disconnects. Use a monotonically
-increasing token and require the token and selected row to still match before
-updating panel state.
+## State and payload
 
 ```javascript
-@track modalOpen = false;
-@track modalRow = null;
-@track modalLoading = false;
-@track modalText = '';
-@track modalError = '';
+import generateInsight from '@salesforce/apex/RecordInsightGenerator.generateInsight';
+
+@track insightOpen = false;
+@track insightRow = null;
+@track insightLoading = false;
+@track insightText = '';
+@track insightError = '';
 
 _insightRequestToken = 0;
-_focusBack = false;
-_focusTriggerRowKey = null;
-_restoreTriggerFocus = false;
+_insightTriggerRowKey = null;
+_focusInsightBack = false;
+_restoreInsightTrigger = false;
 
-get showTable() { return this.hasRows && !this.modalOpen; }
-get modalTitle() {
-    return this.modalRow
-        ? `Insight - ${this.modalRow.accountName || this.modalRow.opportunityId}`
-        : 'Opportunity Insight';
+get showDataSurface() {
+    return this.hasRows && !this.insightOpen;
 }
 
+get insightTitle() {
+    const subject = this._subjectValue(this.insightRow);
+    return subject
+        ? `${INSIGHT_CONTRACT.entitySingularLabel} Insight: ${subject}`
+        : `${INSIGHT_CONTRACT.entitySingularLabel} Insight`;
+}
+
+_subjectValue(row) {
+    const roleKey = INSIGHT_CONTRACT.subjectRoleKey;
+    return row?.displayValues?.[roleKey] || row?.values?.[roleKey] || '';
+}
+
+get backLabel() {
+    return `Back to ${INSIGHT_CONTRACT.entityPluralLabel}`;
+}
+
+_buildInsightPayload(row) {
+    const subjectRole = INSIGHT_CONTRACT.subjectRoleKey;
+    return {
+        schemaVersion: 1,
+        entityLabel: INSIGHT_CONTRACT.entitySingularLabel,
+        subject: {
+            role: subjectRole,
+            label: this._labelsByRole[subjectRole],
+            value: row.values[subjectRole]
+        },
+        insightGoal: INSIGHT_CONTRACT.goal,
+        fields: INSIGHT_CONTRACT.contextRoleKeys.map((roleKey) => ({
+            role: roleKey,
+            label: this._labelsByRole[roleKey],
+            value: row.values[roleKey]
+        }))
+    };
+}
+```
+
+Do not flatten fields into fixed keys such as `Stage` or `Amount`. The generic
+semantic envelope tells Apex what the row represents while preserving bound
+labels.
+
+## Complete request-token pattern
+
+```javascript
 async handleInsightClick(event) {
-    const row = this.rows.find((item) => item.rowKey === event.currentTarget.dataset.rowKey);
+    const rowKey = event.currentTarget.dataset.rowKey;
+    const row = this.rows.find((candidate) => candidate.rowKey === rowKey);
     if (!row) return;
 
     const token = ++this._insightRequestToken;
-    this._focusTriggerRowKey = row.rowKey;
-    this.modalRow = row;
-    this.modalOpen = true;
-    this.modalLoading = true;
-    this.modalText = '';
-    this.modalError = '';
-    this._focusBack = true;
+    this._insightTriggerRowKey = rowKey;
+    this.insightRow = row;
+    this.insightOpen = true;
+    this.insightLoading = true;
+    this.insightText = '';
+    this.insightError = '';
+    this._focusInsightBack = true;
 
-    const payload = {
-        Account: row.accountName,
-        Stage: row.stage,
-        Close_Date: row.closeDate,
-        Type: row.type,
-        Amount: row.amount
-    };
     try {
-        const text = await generateInsight({ rowJson: JSON.stringify(payload) });
-        if (!this._isCurrentInsightRequest(token, row.rowKey)) return;
-        this.modalText = text || '(empty response)';
+        const text = await generateInsight({
+            rowJson: JSON.stringify(this._buildInsightPayload(row))
+        });
+        if (!this._isCurrentInsightRequest(token, rowKey)) return;
+        if (!text || text === 'Unable to generate insight. Please retry.') {
+            this.insightError = text || 'No insight was generated. Please retry.';
+        } else {
+            this.insightText = text;
+        }
     } catch (error) {
-        if (!this._isCurrentInsightRequest(token, row.rowKey)) return;
-        console.error('[vibeInsight] insight request failed.');
-        this.modalError = 'Unable to generate insight. Please retry.';
+        if (!this._isCurrentInsightRequest(token, rowKey)) return;
+        console.error('[vibeInsight] insight request failed:', error);
+        this.insightError = 'Unable to generate insight. Please retry.';
     } finally {
-        if (this._isCurrentInsightRequest(token, row.rowKey)) this.modalLoading = false;
+        if (this._isCurrentInsightRequest(token, rowKey)) {
+            this.insightLoading = false;
+        }
     }
 }
 
 _isCurrentInsightRequest(token, rowKey) {
-    return token === this._insightRequestToken && this.modalOpen && this.modalRow?.rowKey === rowKey;
+    return (
+        this._connected
+        && token === this._insightRequestToken
+        && this.insightOpen
+        && this.insightRow?.rowKey === rowKey
+    );
 }
 
-handleModalClose() {
-    this._closeInsightPanel(true);
+handleInsightClose() {
+    this._resetInsight({ restoreFocus: true });
 }
 
-_invalidateInsightPanel() {
-    this._closeInsightPanel(false);
-}
-
-_closeInsightPanel(restoreTriggerFocus) {
+_resetInsight({ restoreFocus = false } = {}) {
     this._insightRequestToken += 1;
-    this._restoreTriggerFocus = restoreTriggerFocus;
-    this.modalOpen = false;
-    this.modalRow = null;
-    this.modalLoading = false;
-    this.modalText = '';
-    this.modalError = '';
+    this._restoreInsightTrigger = restoreFocus && Boolean(this._insightTriggerRowKey);
+    this.insightOpen = false;
+    this.insightRow = null;
+    this.insightLoading = false;
+    this.insightText = '';
+    this.insightError = '';
+}
+
+_invalidateFeatureState() {
+    this._resetInsight();
+    this._insightTriggerRowKey = null;
+    this._focusInsightBack = false;
+    this._restoreInsightTrigger = false;
 }
 ```
 
-Call `_invalidateInsightPanel()` before starting a relevant query refresh and
-from `disconnectedCallback`. It invalidates late responses without moving focus
-to a row that the refresh may remove. `handleModalClose()` is the
-user-initiated close path and is the only path that restores focus.
+Call `_invalidateFeatureState()` before a mapping registration, on relevant
+filter or parameter refresh, before processing every accepted `dataUpdate`, and
+during disconnect. Programmatic invalidation does not restore focus because a
+refresh may remove the trigger. Selecting a new row increments the token before
+the prior request can update state.
 
-## Focus After A Panel Swap
-
-The panel swap removes the triggering Insight control. Move focus to the Back
-control after render, then restore it to the matching row's Insight control on
-close when that row is still rendered. Use data selectors, never DOM position.
-The panel's actionable Back control belongs at top-left because the dashboard
-uses the tile's top-right hover area.
+## Focus transfer
 
 ```javascript
 renderedCallback() {
-    this._tryStartPipeline();
-    if (this._focusBack) {
-        this._focusBack = false;
+    if (this._focusInsightBack && this.insightOpen) {
+        this._focusInsightBack = false;
         this.template.querySelector('[data-insight-back]')?.focus();
         return;
     }
-    if (!this.modalOpen && this._restoreTriggerFocus && this._focusTriggerRowKey) {
-        const control = [...this.template.querySelectorAll('[data-insight-control]')]
-            .find((element) => element.dataset.insightRowKey === this._focusTriggerRowKey);
-        control?.focus();
-        this._focusTriggerRowKey = null;
-        this._restoreTriggerFocus = false;
+    if (this._restoreInsightTrigger && !this.insightOpen) {
+        this._restoreInsightTrigger = false;
+        const rowKey = this._insightTriggerRowKey;
+        const controls = this.template.querySelectorAll('[data-insight-trigger]');
+        const target = [...controls].find(
+            (control) => control.dataset.rowKey === rowKey
+        );
+        (target || this.template.querySelector('[data-widget-focus-target]'))?.focus();
+        this._insightTriggerRowKey = null;
     }
 }
 ```
 
-```html
-<lightning-button-icon
-  icon-name="utility:einstein"
-  variant="brand"
-  alternative-text="Insight"
-  title="Generate AI insight"
-  data-row-key={row.rowKey}
-  data-insight-row-key={row.rowKey}
-  data-insight-control
-  onclick={handleInsightClick}
-></lightning-button-icon>
+The callback above performs focus work only. Native bindings and hard-coded
+recovery both use private-backed `@api` setters that schedule one-shot query
+startup. LWC selector escaping for arbitrary row keys is fragile, so find the
+matching control from `querySelectorAll` instead of interpolating the key into
+CSS.
 
-<lightning-button-icon
-  data-insight-back
-  icon-name="utility:back"
-  variant="bare"
-  alternative-text="Back to opportunities"
-  title="Back to opportunities"
-  onclick={handleModalClose}
-></lightning-button-icon>
+## Template shape
+
+```html
+<template lwc:if={showDataSurface}>
+  <h2>{dataSurfaceTitle}</h2>
+  <!-- Existing table or chart. Each row action uses: -->
+  <!--
+  <lightning-button-icon
+    data-insight-trigger
+    data-row-key={row.rowKey}
+    icon-name="utility:einstein"
+    variant="brand"
+    alternative-text={row.insightAccessibleLabel}
+    title={row.insightAccessibleLabel}
+    onclick={handleInsightClick}
+  ></lightning-button-icon>
+  -->
+</template>
+
+<!-- Place outside every conditional branch so it always remains rendered. -->
+<span data-widget-focus-target tabindex="-1" class="slds-assistive-text">
+  {widgetStatusLabel}
+</span>
+
+<template lwc:if={insightOpen}>
+  <section class="slds-p-around_medium insight-panel" aria-labelledby="insight-title">
+    <div class="slds-grid slds-grid_vertical-align-center slds-p-bottom_small slds-border_bottom">
+      <lightning-button-icon
+        data-insight-back
+        icon-name="utility:back"
+        variant="bare"
+        alternative-text={backLabel}
+        title={backLabel}
+        onclick={handleInsightClose}
+      ></lightning-button-icon>
+      <h3 id="insight-title" class="slds-text-heading_small slds-p-left_small">
+        {insightTitle}
+      </h3>
+    </div>
+    <div class="slds-p-top_medium">
+      <template lwc:if={insightLoading}>
+        <div role="status" aria-live="polite">
+          <lightning-spinner alternative-text="Generating insight" size="small"></lightning-spinner>
+        </div>
+      </template>
+      <template lwc:if={insightText}>
+        <p class="insight-narrative" role="status" aria-live="polite">{insightText}</p>
+      </template>
+      <template lwc:if={insightError}>
+        <p class="slds-text-color_error" role="alert">Insight failed: {insightError}</p>
+      </template>
+    </div>
+  </section>
+</template>
 ```
 
-Keep the table and panel mutually exclusive. Render in-widget error text in a
-`slds-text-color_error` paragraph and use a non-empty spinner alternative text.
+Generate each row's `insightAccessibleLabel` from the action and subject, such
+as `Explain Case 00001234`. Its programmatic name must include the visible
+action wording.
+
+```css
+.insight-panel { min-height: 12rem; }
+.insight-narrative { font-size: 1rem; line-height: 1.5; }
+```
+
+## Verification
+
+1. Rapidly select row A then row B; A cannot overwrite B.
+2. Close during generation; the response cannot reopen or update the panel.
+3. Refresh or remap data; the panel closes and pending work is invalidated.
+4. Keyboard activation moves focus to Back after render.
+5. A user-initiated Back restores focus to the triggering row or the persistent
+   widget target if the row disappeared.
+6. Programmatic refresh invalidation does not restore focus to stale row UI.
+7. Loading and completion use status semantics; errors use alert semantics and
+   expose only user-safe text.
+8. The payload includes only the configured entity, subject, goal, and context
+   roles and contains no leaked canonical sales fields.
+9. `renderedCallback` contains only focus transfer, never query startup or sync.

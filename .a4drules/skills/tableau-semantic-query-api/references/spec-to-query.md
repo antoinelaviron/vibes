@@ -23,7 +23,7 @@ them.
 
 **SDK spec:**
 ```javascript
-{ model: 'Opportunity.Probability', aggregationType: 'SUM' }
+{ model: 'Opportunity.Probability', rowGrouping: false, aggregationType: 'SUM' }
 ```
 
 **Semantic Query field:**
@@ -38,7 +38,7 @@ them.
 
 **SDK spec:**
 ```javascript
-{ model: 'Total_Amount_clc', aggregationType: 'USER_AGG' }
+{ model: 'Total_Amount_clc', rowGrouping: false }
 ```
 
 **Semantic Query field:**
@@ -49,16 +49,15 @@ them.
 }
 ```
 
-**Why not omit `aggregationType`?** The SDK doesn't default to `USER_AGG`
-when the property is missing — it applies a different aggregation that
-mismatches the SDM's `function: "UserAgg"`, causing HTTP 400 at the semantic
-engine. Always pass `aggregationType: 'USER_AGG'` explicitly for these fields.
+The two transports use different aggregation contracts. SDK field registration
+omits `aggregationType` so the SDM owns the calculated measurement's
+aggregation. The gateway JSON makes `USER_AGG` explicit.
 
 ## Model-level metrics (`*_mtc`)
 
 **SDK spec:**
 ```javascript
-{ model: 'Total_Sales_mtc', aggregationType: 'USER_AGG' }
+{ model: 'Total_Sales_mtc', rowGrouping: false }
 ```
 
 **Semantic Query field:**

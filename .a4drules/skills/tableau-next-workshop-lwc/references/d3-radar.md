@@ -1,146 +1,104 @@
-# d3-radar — polar multi-metric comparison (industry profile)
+# D3 radar: multi-measure entity comparison
 
-**Attribution:** shape adapted from an internal reference `radarChart`
-implementation (itself derived from Nadieh Bremer's public D3 radar-chart
-gist). That version loads D3 from a
-CDN and expects data via `@api` — this reference loads D3 the
-LWC-native way (per `references/d3-in-lwc.md`) and pulls from the
-workshop's Sales Cloud SDM.
+Use a radar chart when the prompt asks to compare a small number of entities
+across several measures. Generate one static semantic property per requested
+axis; do not invent a runtime array-valued binding.
 
-**What this teaches:** how to render a radar (spider) chart on polar
-coordinates — one axis per metric, one closed polygon per entity
-(industry, rep, product line). Great for "how do these two industries
-compare across 5 dimensions" — a shape stock Tableau Next won't draw.
+## Semantic roles
 
-**Sales Cloud SDM fit:** one row per `Primary_Industry` (or `Account_Type`,
-or `OwnerUser`), with five measures fanned out as axes:
-`Win_Rate_clc`, `Avg_Deal_Size_clc`, `Sales_Cycle_clc`,
-`Pipeline_Generation_clc`, `Number_of_Opportunities_clc`. All exist in
-the workshop template SDM. Attendee prompt shape: *"radar chart
-comparing win rate, avg deal size, sales cycle, pipeline, and
-opportunity count across industries."*
+| Property | Type | Purpose |
+|---|---|---|
+| `entityField` | `SemanticDimension` | Polygon identity and legend label |
+| Prompt-derived measure properties | `SemanticMeasure` | One radial axis each |
 
-**Do NOT copy this file verbatim.** SDM apiNames come from discovery.
+For example, a supplier prompt might generate `qualityField`, `leadTimeField`,
+`costField`, `sustainabilityField`, and `reliabilityField`. The example names
+must not leak into another prompt.
 
-## Rules
-
-- **Every rule from `references/d3-in-lwc.md` applies** —
-  `lwc:dom="manual"`, `loadScript` from `d3` static resource,
-  `_pendingRows` buffer, ResizeObserver from the render function.
-- **`registerFieldsForQuery`** — five measures on one row per
-  industry: one dimension (`Primary_Industry`, `rowGrouping: true`)
-  followed by five `_clc` measures (`rowGrouping: false`, NO
-  `aggregationType`). Spec order: dim first, all measures last
-  (Gate #8).
-- **Normalize each axis independently.** Measures have wildly
-  different scales — Sales Cycle is 30-90 days, Win Rate is 0.15-0.60.
-  Build a per-axis `scaleLinear` with domain `[0, max]` and range
-  `[0, radius]`. Never share one scale across all axes.
-- **Close the path.** Use `d3.lineRadial().curve(d3.curveLinearClosed)`
-  or `d3.curveCardinalClosed` — an unclosed path leaves a gap between
-  the first and last axis.
-- **Cap entities at 3–4.** More than 4 overlapping polygons is visual
-  noise. Use `limit: 4` in `registerFieldsForQuery`, or add a
-  post-filter in `_handleDataUpdate` to keep the top N by pipeline.
-- **Fill opacity ≤ 0.35** so overlapping polygons remain readable.
-  On hover, boost the hovered polygon to 0.7 and dim the others to
-  0.1.
-
-## Annotated snippet — the polar draw
+Generate axis descriptors from the confirmed roles:
 
 ```javascript
-_renderChart() {
-    const container = this.template.querySelector('.chart-container');
-    const { width, height } = container.getBoundingClientRect();
-    const radius = Math.min(width, height) / 2 - 40;
-
-    // rows[i] = { industry, winRate, avgDeal, salesCycle, pipeline, oppCount }
-    const axes = [
-        { key: 'winRate',    label: 'Win Rate'    },
-        { key: 'avgDeal',    label: 'Avg Deal'    },
-        { key: 'salesCycle', label: 'Sales Cycle' },
-        { key: 'pipeline',   label: 'Pipeline'    },
-        { key: 'oppCount',   label: '# Opps'      }
-    ];
-    const angleSlice = (Math.PI * 2) / axes.length;
-
-    // Per-axis scale — each measure normalized to [0, radius].
-    const scales = {};
-    axes.forEach(({ key }) => {
-        scales[key] = d3.scaleLinear()
-            .domain([0, d3.max(this.rows, (d) => d[key]) || 1])
-            .range([0, radius]);
-    });
-
-    const svg = d3.select(container).append('svg')
-        .attr('width', width).attr('height', height)
-        .append('g')
-        .attr('transform', `translate(${width / 2},${height / 2})`);
-
-    // Grid circles.
-    const levels = 5;
-    for (let l = 1; l <= levels; l++) {
-        svg.append('circle')
-            .attr('r', (radius / levels) * l)
-            .attr('fill', 'none').attr('stroke', '#ddd');
-    }
-
-    // Axis spokes + labels.
-    axes.forEach((axis, i) => {
-        const angle = i * angleSlice - Math.PI / 2;
-        svg.append('line')
-            .attr('x2', Math.cos(angle) * radius)
-            .attr('y2', Math.sin(angle) * radius)
-            .attr('stroke', '#bbb');
-        svg.append('text')
-            .attr('x', Math.cos(angle) * (radius + 14))
-            .attr('y', Math.sin(angle) * (radius + 14))
-            .attr('text-anchor', 'middle').text(axis.label);
-    });
-
-    // One polygon per row.
-    const color = d3.scaleOrdinal(d3.schemeCategory10);
-    const radarLine = d3.lineRadial()
-        .curve(d3.curveLinearClosed)
-        .radius((d, i) => scales[axes[i].key](d))
-        .angle((d, i) => i * angleSlice);
-
-    svg.selectAll('.polygon').data(this.rows).enter()
-        .append('path')
-        .attr('d', (row) => radarLine(axes.map((a) => row[a.key])))
-        .attr('fill', (_, i) => color(i))
-        .attr('fill-opacity', 0.35)
-        .attr('stroke', (_, i) => color(i))
-        .attr('stroke-width', 2);
-}
+const RADAR_AXES = [
+    { key: 'quality', propertyName: 'qualityField', direction: 'higherIsBetter' },
+    { key: 'leadTime', propertyName: 'leadTimeField', direction: 'lowerIsBetter' },
+    { key: 'cost', propertyName: 'costField', direction: 'lowerIsBetter' }
+];
 ```
 
-## Wiring into the pipeline
+Confirm scale direction and formatting for each axis. A value being numerically
+higher does not always mean better.
+
+## Layout rules
+
+- Apply every rule in `d3-in-lwc.md`.
+- Query the entity dimension first, followed by all measure roles.
+- Use each bound measure label for its axis and assistive summary.
+- Normalize each axis independently. Do not share a scale across measures with
+  different units.
+- Use a confirmed domain strategy: zero-to-max, observed extent, or a supplied
+  business domain. Do not silently force zero when that misrepresents the
+  metric.
+- Reverse normalized direction for an explicitly `lowerIsBetter` comparison
+  only when the prompt asks the polygon to encode desirability rather than raw
+  magnitude. Explain that transformation in visible copy.
+- Close polygons with `d3.curveLinearClosed` or
+  `d3.curveCardinalClosed`.
+- Limit the returned comparison to three or four entities. Derive which
+  selection role/direction to use; do not assume a pipeline measure.
+- Keep fill opacity at or below `0.35`.
+- If polygons highlight on pointer hover, add equivalent focus behavior and a
+  keyboard-accessible legend control.
+
+## Core axis shape
+
+```javascript
+const axes = RADAR_AXES.map((axis) => ({
+    ...axis,
+    label: this[axis.propertyName].label
+}));
+
+const scales = Object.fromEntries(axes.map((axis) => [
+    axis.key,
+    this._scaleForAxis(axis, this.rows, radius)
+]));
+const line = d3.lineRadial()
+    .curve(d3.curveLinearClosed)
+    .radius((value, index) => scales[axes[index].key](value))
+    .angle((value, index) => index * angleSlice);
+```
+
+Add an SVG title/description and a textual table or list of entity values. A
+polygon shape alone is not an equivalent representation of multiple measures.
+
+## Query shape
 
 ```javascript
 const specs = [
-    { model: `${OBJ_ACCOUNT}.<industry-dim>`,  rowGrouping: true  },
-    { model: '<win-rate-apiName>_clc',         rowGrouping: false },
-    { model: '<avg-deal-apiName>_clc',         rowGrouping: false },
-    { model: '<sales-cycle-apiName>_clc',      rowGrouping: false },
-    { model: '<pipeline-apiName>_clc',         rowGrouping: false },
-    { model: '<opp-count-apiName>_clc',        rowGrouping: false }
+    { model: this.entityField.name, rowGrouping: true },
+    ...RADAR_AXES.map((axis) =>
+        measureSpecFromBinding(
+            this[axis.propertyName],
+            axis.allowedAggregations
+        )
+    )
 ];
-// Row shape: [industry, winRate, avgDeal, salesCycle, pipeline, oppCount].
+// Row contract: [entity, ...axisValues].
 ```
 
-## Common surprises
+Compile an `allowedAggregations` list into each generated axis descriptor so
+its aggregation remains compatible with that axis's units and formatter.
 
-- **All polygons collapse to a dot at center.** A per-axis scale is
-  missing or its domain max is 0 — every value normalizes to 0.
-  Log the domains to confirm.
-- **One axis dominates and the others look flat.** Shared scale
-  across axes. Rebuild per-axis scales.
-- **The polygon has a big triangular gap.** Missing
-  `curveLinearClosed` (or `curveCardinalClosed`).
+## Verification
 
-## See also
+- Axis count and property names match the prompt exactly.
+- Labels come from each mapped binding.
+- Measures with different units receive independent scales and formatters.
+- Zero-only or constant axes have a nonzero safe domain.
+- Entity selection uses the confirmed role and returned-result wording.
+- Hover highlighting has focus and keyboard parity.
 
-- SKILL.md gates: **#7** (registerFieldsForQuery), **#8** (spec order).
-- `references/d3-in-lwc.md` — every rule there applies.
-- `references/sdm-table.md` — same pipeline shape, different render.
+## DF26 worked example
+
+For an industry comparison, axes may map to win rate, average deal size, sales
+cycle, pipeline, and opportunity count. Treat their scale directions and units
+independently; these five measures are not universal radar defaults.

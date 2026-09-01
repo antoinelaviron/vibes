@@ -1,55 +1,160 @@
-# Smoke-test a semantic query before writing LWC code
+# Smoke-test a prompt-derived semantic query
 
-Smoke-test every new data-backed query before generating its LWC. This catches
-field and aggregation errors before the attendee deploys a tile that can only
-show a generic runtime error. The smoke test validates field shape; it does not
-prove that `registerFieldsForQuery` uses equivalent server-side ordering.
+Smoke-test every new data-backed query before generating its LWC. Use the
+`tableau-semantic-query-api` skill to translate the confirmed role mapping into
+a `structuredSemanticQuery`, then run its gateway script. For hard-coded
+recovery, do this before LWC generation. For native binding, do it after the
+dashboard author maps every semantic role. The smoke test validates field shape;
+it does not prove equivalent server-side ordering in `registerFieldsForQuery`.
 
-## Authenticate
+## Contents
 
-```bash
-export SF_ORG=<alias>
-export SF_TOKEN=$(sf org auth show-access-token --target-org "$SF_ORG" --json | jq -r '.result.accessToken')
-export SF_INSTANCE=$(sf org display --target-org "$SF_ORG" --json | jq -r '.result.instanceUrl')
-```
+- [Role handoff](#role-handoff)
+- [Translate roles to gateway fields](#translate-roles-to-gateway-fields)
+- [Run the smoke script](#run-the-smoke-script)
+- [Preflight checks](#preflight-checks)
+- [Response checks](#response-checks)
 
-## Query Payload
+## Role handoff
 
-Create `/tmp/smoke-query.json`. Every source, object, and field value must come
-from the live discovery hand-off. Use object terminology, not `sdo` placeholders.
+Start from the same canonical handoff consumed by the LWC:
 
 ```json
 {
-  "semanticQuery": {
-    "sources": [{ "type": "SemanticModel", "name": "<source-name>" }],
+  "sourceName": "verified model API name",
+  "limit": 25,
+  "roles": [
+    {
+      "key": "recordNumber",
+      "kind": "dimension",
+      "model": "Object.Verified_Number",
+      "visible": true
+    },
+    {
+      "key": "ageDays",
+      "kind": "measure",
+      "model": "Object.Verified_Age",
+      "aggregationType": "MAX",
+      "visible": true
+    }
+  ],
+  "displayOrder": ["recordNumber", "ageDays"],
+  "identityRoleKey": "recordNumber",
+  "actionTargetRoleKey": null
+}
+```
+
+The values show structure only. Use the live mapped model and fields. Do not
+auto-pick a substitute or continue with an unresolved field.
+
+## Translate roles to gateway fields
+
+Read `../tableau-semantic-query-api/references/spec-to-query.md` and preserve
+the role order used by the LWC: every dimension first, then every measure.
+
+| Role model | Gateway expression | Other keys |
+|---|---|---|
+| Qualified dimension `Object.field` | `table_field: { name: "field", table_name: "Object" }` | `grouping: "ROW_GROUPING"` |
+| Bare calculated dimension | `semantic_field: { name: "field" }` | `grouping: "ROW_GROUPING"` |
+| Qualified raw measure | `table_field: { name: "field", table_name: "Object" }` | `semantic_aggregation_method` matching the verified aggregation |
+| Bare calculated measurement | `semantic_field: { name: "field" }` | `semantic_aggregation_method: "SEMANTIC_AGGREGATION_METHOD_USER_AGG"` |
+| Bare metric | `semantic_field: { name: "field" }` | `semantic_aggregation_method: "SEMANTIC_AGGREGATION_METHOD_AUTO"` |
+
+Write a temporary query file shaped like:
+
+```json
+{
+  "structuredSemanticQuery": {
     "fields": [
-      { "expression": { "modelField": { "name": "<object-api-name>.<dimension-api-name>" } }, "rowGrouping": true },
-      { "expression": { "modelField": { "name": "<object-api-name>.<dimension-api-name>" } }, "rowGrouping": true },
-      { "expression": { "modelField": { "name": "<calc-measure-api-name>_clc" } } }
+      {
+        "expression": {
+          "table_field": {
+            "name": "<verified dimension field>",
+            "table_name": "<verified object>"
+          }
+        },
+        "grouping": "ROW_GROUPING"
+      },
+      {
+        "expression": {
+          "table_field": {
+            "name": "<verified raw measure>",
+            "table_name": "<verified object>"
+          }
+        },
+        "semantic_aggregation_method": "SEMANTIC_AGGREGATION_METHOD_MAX"
+      }
     ],
-    "options": { "limit": 25 }
+    "options": {
+      "limit_options": {
+        "limit": 25
+      }
+    }
   }
 }
 ```
 
-For raw object-scoped measures, add the appropriate aggregation. For model-level
-`_clc` and `_mtc` fields, do not add aggregation and do not add an object prefix.
+Use the exact query schema produced by `tableau-semantic-query-api`; the block
+above illustrates role translation and is not a field source. For raw
+object-scoped measures, use the matching verified aggregation. For model-level
+`_clc` and `_mtc` fields, keep the field bare and apply the gateway semantic
+aggregation described above.
 
-## Run
+The equivalent LWC handoff remains dimensions first and uses the SDK's uppercase
+aggregation value:
 
-```bash
-curl -sw "\n%{http_code}\n" -X POST \
-  "$SF_INSTANCE/services/data/v66.0/ssot/query-sql?dataspace=default" \
-  -H "Authorization: Bearer $SF_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d @/tmp/smoke-query.json
+```javascript
+const specs = [
+    { model: 'Object.Verified_Number', rowGrouping: true },
+    {
+        model: 'Object.Verified_Age',
+        rowGrouping: false,
+        aggregationType: 'MAX'
+    }
+];
+
+sdk.registerFieldsForQuery(specs, sourceName, { limit: 25 });
 ```
 
-On HTTP 200, confirm the returned metadata order matches the LWC `IDX` map and
-the query grain. The response proves the field mapping is valid. It does not
-prove global top-N ordering, so keep component copy bounded to returned rows.
+## Run the smoke script
 
-On HTTP 400, rerun discovery for invalid fields, remove aggregation from
-model-level calculations, or qualify a raw field as `Object.field`. On HTTP 401,
-refresh the token; on HTTP 403, treat missing Data Cloud permission as an org
-configuration issue.
+```bash
+.a4drules/skills/tableau-semantic-query-api/scripts/smoke.sh \
+  <org-alias> <sdm-api-name> /tmp/query.json
+```
+
+The gateway script expects the query file to contain the
+`structuredSemanticQuery` body and resolves the model ID itself.
+
+## Preflight checks
+
+1. Every role maps to a field present in the selected model.
+2. Object fields use `Object.field`; model-level calculated fields remain bare.
+3. Every dimension precedes every measure.
+4. Qualified raw measures include the confirmed aggregation.
+5. Bare calculated measurements omit aggregation in the LWC spec but translate
+   to gateway `USER_AGG`.
+6. The query limit matches the generated component's `{ limit }` registration.
+7. Expected returned column count equals role count.
+8. The identity role or deterministic composite is present.
+9. An action target is a dimension and does not change the intended row grain.
+
+## Response checks
+
+HTTP 201 proves that the source and field query is accepted. Also verify:
+
+- Returned metadata and positional values follow the ordered roles.
+- An empty result is valid for the current filters rather than a mapping error.
+- Representative values match each role's expected value kind.
+- Salesforce action values are string IDs and match a confirmed prefix only
+  when the target object has one.
+- When Build 3 adds an action target, row count and grouping match Build 2.
+
+On a validation error, rerun discovery for invalid fields, verify qualified raw
+field names and aggregations, and keep model-level calculated fields bare. On an
+authentication or permission error, refresh the org token or treat the missing
+Data Cloud permission as an org configuration issue.
+
+Gateway success does not prove dashboard filters flow into
+`registerFieldsForQuery`. Apply one relevant external filter separately in the
+live dashboard release gate.

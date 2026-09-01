@@ -1,186 +1,457 @@
 ---
 name: tableau-next-workshop-lwc
 description: |
-  Builds and evolves Tableau Next dashboard-extension LWCs for the DF26 workshop.
-  Use for workshop requests involving analytics__Dashboard, vibeTable, vibeInsight,
-  vibeAction, vibeChart, vibeChord, vibeSparkline, vibeSearch, vibeKanban,
-  vibeTheme, vibeVideo, Tableau Next dashboard extensions, or the workshop's
-  Tableau SDK, AI insight, and Salesforce-action patterns. Do not use for generic
-  Lightning pages, Tableau Cloud .trex extensions, or semantic-model authoring.
+  Builds and evolves Tableau Next dashboard extension LWCs for the DF26
+  workshop. Use for vibeTable, vibeInsight, vibeAction, analytics__Dashboard,
+  native semantic bindings, or the workshop D3 and media variations. Derives
+  each component's business roles from the attendee's prompt while preserving
+  the workshop's SDK, accessibility, insight, and navigation contracts. Do not
+  use for generic Lightning pages, Tableau Cloud .trex extensions, or semantic
+  model calculated-field authoring.
 license: Apache-2.0
 metadata:
   author: alaviron
-  version: workshop-4.0
+  version: workshop-5.1
   fork_of: tableau-next-custom-lwc
-  api-version: v66.0
+  api-version: v67.0
 ---
 
-# tableau-next-workshop-lwc
+# Tableau Next workshop LWC
 
-This skill owns the DF26 workshop's Tableau Next dashboard-extension LWCs.
-It has three core builds for the one-hour path and optional menu patterns that
-are loaded only when requested. Use the production `tableau-next-custom-lwc`
-skill for non-workshop work.
+Build one prompt-authored extension through three deployable bundles:
+`vibeTable` -> `vibeInsight` -> `vibeAction`. Native Tableau Next data binding
+is the default. Hard-coded fields exist only as an explicit recovery path.
+
+This lifecycle was release-gated with 14 data-binding bundles in
+`26213playground`: automated tests, deployment, and live Tableau Next dashboard
+tests all passed. Treat `references/sdm-data-binding.md` as the validated
+canonical implementation contract.
+
+Do not reuse this workshop fork for production LWC work. Use the canonical
+`tableau-next-custom-lwc` skill from `alaviron/tableau-skills` instead.
+
+`SKILL.md` is the routing and workshop-gate layer. For every data-backed
+component, `references/sdm-data-binding.md` and
+`references/sdk-query-lifecycle.md` are contract-equivalent statements of the
+August 31 live-gated lifecycle. Feature references add presentation or
+interaction behavior without replacing that lifecycle.
+
+## Authoring boundary
+
+Keep the technical framework fixed and derive the business design from the
+attendee's prompt.
+
+| Fixed by this skill                           | Derived from the prompt                     |
+| --------------------------------------------- | ------------------------------------------- |
+| API version `67.0` and `analytics__Dashboard` | Entity vocabulary and labels                |
+| Native semantic property types                | Property names and semantic roles           |
+| Registered-query and lifecycle mechanics      | Visible and hidden fields                   |
+| Dimensions before measures                    | Display order, sorting, and formatting      |
+| Proxy-row normalization                       | Insight subject, goal, and payload fields   |
+| Three separate bundles                        | Filters, selections, and Salesforce actions |
+| Accessibility and error behavior              | Chart-specific presentation choices         |
+
+References are runtime patterns, not business templates. Never carry an
+Opportunity, Account, Stage, Amount, or Log a Call assumption into an unrelated
+prompt. Use those concepts only when requested or inside the clearly labelled
+DF26 Top Opportunities worked example.
+
+## Workflow
+
+1. Read the attendee prompt and the matching reference before writing code.
+2. Derive a semantic role contract and present it for confirmation.
+3. Generate the current bundle from the confirmed contract.
+4. Verify metadata, query ordering, row mapping, accessibility, and bounded
+   result language.
+5. Deploy only the current bundle when the attendee asks for deployment.
+6. Return the canonical dashboard-placement instructions after a successful
+   deploy.
+
+For Build 2 or 3, first read the previous deployed bundle under
+`force-app/main/default/lwc/`. It is the source of truth for inherited property
+names, types, purposes, query roles, display order, formatting, and row keys.
+
+## Prompt-derived role contract
+
+Define this generation-time contract before Build 1. It is an authoring aid,
+not a runtime JSON configuration API. Compile it into concrete metadata,
+`@api` accessors, query specs, row mapping, and UI code.
+
+```javascript
+const COMPONENT_CONTRACT = {
+  entity: {
+    singularLabel: "Case",
+    pluralLabel: "Cases",
+  },
+  roles: [
+    {
+      key: "caseNumber",
+      propertyName: "caseNumberField",
+      bindingType: "SemanticDimension",
+      pickerLabel: "Case Number",
+      purpose: "Case number displayed in each row.",
+      required: true,
+      visible: true,
+      valueKind: "text",
+      behaviors: ["rowIdentity", "primaryLabel", "insightContext"],
+    },
+    {
+      key: "ageDays",
+      propertyName: "ageDaysField",
+      bindingType: "SemanticMeasure",
+      pickerLabel: "Case Age",
+      purpose: "Case age used for display and sorting.",
+      required: true,
+      visible: true,
+      valueKind: "number",
+      behaviors: ["primarySort", "insightContext"],
+    },
+  ],
+  displayOrder: ["caseNumber", "ageDays"],
+  sort: { roleKey: "ageDays", direction: "desc", scope: "returnedRows" },
+  insight: {
+    subjectRoleKey: "caseNumber",
+    contextRoleKeys: ["caseNumber", "ageDays"],
+    goal: "Explain the case status and suggest one supported next action.",
+  },
+  action: null,
+  queryLimit: 5000,
+  displayLimit: null,
+};
+```
+
+Derive only roles the prompt needs. Do not invent a measure for a
+dimensions-only list. Do not invent a record action for an aggregate row.
+Clarify these cases before generation when the prompt does not supply enough
+meaning:
+
+- No stable row identity and no safe deterministic composite.
+- Ambiguous dimension versus measure intent.
+- A measure without a selected aggregation.
+- Formatting that cannot be inferred safely, such as currency or percentage.
+- Funnel order, ranking direction, or time grain not stated by the prompt.
+- An action without a confirmed target record role or action API name.
+
+Use role keys for internal behavior and `propertyName` for the persisted
+dashboard contract. Use display labels from bound `.label` values after
+mapping. Keep query order independent from display order: query every dimension
+first and every measure last, while rendering `displayOrder` exactly.
+
+## Native binding contract
+
+Read `references/sdm-data-binding.md` for every data-backed component. The
+dashboard runtime supplies:
+
+| Role type      | Metadata type       | Runtime value                  |
+| -------------- | ------------------- | ------------------------------ |
+| Semantic model | `SemanticModel`     | `{ apiName, id, label }`       |
+| Dimension      | `SemanticDimension` | `{ name, label }`              |
+| Measure        | `SemanticMeasure`   | `{ name, aggregation, label }` |
+
+Read these objects directly. Do not accept legacy string fallbacks, derive
+labels from API names, or substitute a hard-coded field when a role is missing.
+Declare the model and every role under
+`<targetConfig targets="analytics__Dashboard">`. Never expose runtime-injected
+`sdk` in metadata.
+
+Bindings are persisted dashboard contracts. Once a bundle is deployed, never
+rename, remove, change the type or requiredness of, or repurpose a property.
+Create a new bundle or add a genuinely optional role instead.
+
+### Hard-coded recovery mode
+
+Use recovery mode only when the attendee explicitly asks for the basic wire
+contract or needs the recovery build. Invoke
+`tableau-next-workshop-sdm-discovery`, pass it the confirmed semantic role
+contract, and require a live API-derived mapping from the attendee's org in the
+current session. Get an explicit "yes" before generating SDK code. Then read
+`references/sdm-table.md`.
+
+Never treat the discovery skill's `references/field-mapping-table.md` or a
+worked example as a data source. Never hard-code a source, object, or field
+from a reference.
 
 ## Routing
 
 | Request | Starting point | Read before writing code |
 | --- | --- | --- |
-| Build 1: `vibeTable` | New bundle | `sdk-query-lifecycle.md`, `sdm-table.md` |
-| Build 2: `vibeInsight` | Attendee's `vibeTable` | Core references, `apex-insight-panel.md` |
-| Build 3: `vibeAction` | Attendee's `vibeInsight` | Core references, `salesforce-action-link.md` |
-| `vibeChart` | Purpose-built aggregate visualization | `sdk-query-lifecycle.md`, `d3-in-lwc.md`, matching `d3-*.md` |
-| `vibeChord` | Purpose-built aggregate visualization | `sdk-query-lifecycle.md`, `d3-in-lwc.md`, `d3-chord.md` |
-| `vibeSparkline` | Preserve `vibeAction`; add a column | Core references, `d3-in-lwc.md`, `sparkline-column.md` |
-| `vibeSearch`, `vibeKanban`, `vibeTheme` | Preserve `vibeAction` behavior | Core references and the attendee prompt |
-| `vibeVideo` | Independent media tile | `video-player.md`; skip SDM discovery and SDK code |
+| Build 1: `vibeTable` | New prompt-derived bundle | `sdm-data-binding.md`, `sdk-query-lifecycle.md`, `sdm-table.md` |
+| Build 2: `vibeInsight` | Attendee's deployed `vibeTable` | Core lifecycle references, `apex-insight-panel.md` |
+| Build 3: `vibeAction` | Attendee's deployed `vibeInsight` | Core lifecycle references, `salesforce-action-link.md` |
+| D3 chart route | Purpose-built aggregate visualization when requested | Core lifecycle references, `d3-in-lwc.md`, matching `d3-*.md` |
+| Sparkline route | Preserve the inherited table behavior | Core lifecycle references, `d3-in-lwc.md`, `sparkline-column.md` |
+| Search, Kanban, or theme route | Preserve the inherited `vibeAction` contract | Core lifecycle references, attendee prompt, `test-contract.md` |
+| `vibeVideo` | Independent media tile | `video-player.md`; no SDK query or SDM discovery |
 
-The optional aggregate visualizations replace the table and do not need the
-Insight or Log a Call surface. `vibeVideo` is the only pure-media exception.
+Optional routes are loaded only when requested. Aggregate D3 routes may replace
+the table when the prompt says so; search, Kanban, theme, and sparkline routes
+preserve the inherited prompt-derived roles and behavior. Do not assume an
+Opportunity schema or Account action for any optional route.
 
-## Critical Gates
+## The three builds
 
-1. **Read the routed references before writing code.** References are patterns,
-   not starters. Author from the attendee's prompt; never paste a reference
-   unchanged.
-2. **Use live discovery for every data-backed Build 1.** First invoke
-   `tableau-next-workshop-sdm-discovery`. Require its current-session live
-   hand-off and explicit attendee confirmation before generating code. Never
-   copy source names, object API names, or field names from an example.
-3. **Preserve the Tableau target.** Use `<target>analytics__Dashboard</target>`.
-   Never substitute `lightning__AppPage` or `tableau__DashboardExtension`.
-4. **Use the canonical SDK lifecycle.** Data-backed components must follow
-   `references/sdk-query-lifecycle.md`. It preserves Tableau filtering and
-   avoids the startup and reconnect races discovered in workshop testing.
-5. **Use `registerFieldsForQuery`, never `fetchDataUsingQueryAndSource`.** The
-   registered path lets the dashboard runtime inject active filters and
-   parameters. Do not call `fetchData()` after registration or from filter and
-   parameter handlers because the SDK owns that refresh.
-6. **Declare all dimensions before measures.** The SDK returns grouped
-   dimensions before measures even if specs are interleaved. Keep
-   `rowGrouping: true` specs first, then `rowGrouping: false` specs, and build
-   `IDX` in that returned order. This prevents an amount from being used as a
-   record ID.
-7. **Use `Object.field` for raw fields and bare names for model-level calcs.**
-   Raw dimensions are qualified and grouped. Raw measures are qualified with an
-   appropriate aggregation. `_clc` and `_mtc` fields are bare model names with
-   no `aggregationType` because the SDM owns their aggregation.
-8. **Use `OBJ_` terminology.** The workshop model has objects, not SDOs. Use
-   `OBJ_OPPORTUNITY`, never `SDO_OPPORTUNITY`, in code and prose.
-9. **Keep Build 2 AI calls in Apex.** Read
-   `force-app/main/default/classes/OpportunityInsightGenerator.cls` before
-   importing it. Use its exact `@AuraEnabled` method and parameter shape; never
-   call the Models API from browser JavaScript.
-10. **Rewrite Salesforce action origins.** `NavigationMixin` does not work from
-    the analytics iframe. Use the validated URL pattern in
-    `salesforce-action-link.md`.
-11. **Use SLDS first.** Prefer SLDS utilities and tokens. Small CSS files are
-    appropriate for iframe-safe layout and visualizations. Do not use inline
-    layout styles.
+| Build | Bundle             | Read                                                  | Change                                                       |
+| ----- | ------------------ | ----------------------------------------------------- | ------------------------------------------------------------ |
+| 1     | `lwc/vibeTable/`   | `references/sdm-data-binding.md`                      | Derive and freeze roles; render the requested table or chart |
+| 2     | `lwc/vibeInsight/` | prior bundle + `references/apex-insight-panel.md`     | Preserve the contract; add a prompt-derived per-row insight  |
+| 3     | `lwc/vibeAction/`  | prior bundle + `references/salesforce-action-link.md` | Preserve the contract; add the requested Salesforce action   |
 
-## Core Builds
+Each build creates a new LWC folder. Do not evolve one bundle in place across
+the three workshop prompts. This gives attendees three independent successful
+deploys and makes previous output the recovery point.
 
-### Build 1: Data table
+For a later showcase that presents both Build 2 and Build 3 in one component,
+use one `Insights & Actions` view with both row controls. Do not create separate
+tabs whose only difference is the addition of the action control.
 
-1. Invoke discovery, present the confirmed mapping, and wait for confirmation.
-2. Before writing a new semantic query, follow `smoke-test-query.md`. The smoke
-   test proves field validity, not runtime ordering.
-3. Create `force-app/main/default/lwc/vibeTable/` with `.js`, `.html`, and
-   `.js-meta.xml` files. Use source API version `66.0` or the project's matching
-   version.
-4. Follow `sdk-query-lifecycle.md` for delayed SDK injection, bounded hydration,
-   subscription, loading, terminal timeout, and reconnect behavior.
-5. Follow `sdm-table.md` for row mapping, date display, and bounded result copy.
+### Build 1: data surface
 
-### Build 2: Per-row AI insight
+1. Confirm the role contract, including property names, types, visibility,
+   display order, formatting, row identity, sorting, interactions, query limit,
+   and optional display limit.
+2. Scaffold `vibeTable.js`, `vibeTable.html`, and
+   `vibeTable.js-meta.xml`; add CSS only for iframe-safe layout needs.
+3. Use class `VibeTable`, master label `Vibe Table`, API `67.0`, and target
+   `analytics__Dashboard`.
+4. Compile every role into a native semantic property and private-backed
+   `@api` accessor.
+5. Register dimensions before measures and keep the final spec order as the
+   positional row contract.
+6. Render columns or marks in the prompt-derived display order using bound
+   labels.
+7. Keep query and display limits explicit. A null display limit renders every
+   returned row; a numeric display limit applies only after client-side sorting.
+   Describe the result honestly: say "Up to 5,000 returned cases, sorted by
+   displayed age," not "Top cases," unless server-side measure ordering has
+   been proved.
 
-1. Read the attendee's deployed `force-app/main/default/lwc/vibeTable/` first.
-   Preserve its confirmed query shape and `IDX` map in a new `vibeInsight`
-   bundle.
-2. Read `OpportunityInsightGenerator.cls` and
-   `references/apex-insight-panel.md` before adding the Apex import, request
-   token, panel swap, or focus management.
-3. Keep the table and panel mutually exclusive. Invalidate pending insight work
-   on close, query refresh, and disconnect.
+The shared query contract is fixed: subscribe before registration,
+`registerFieldsForQuery` owns fetching, `dataUpdate` is the only data path, and
+filter/parameter handlers never call `fetchData()`.
 
-### Build 3: Per-row Log a Call
+Use the live-proven one-shot startup contract. Every `@api` setter schedules a
+microtask that attempts startup; the component starts once after it is connected
+and all required mappings exist. Do not synchronize bindings from
+`renderedCallback`, hydrate the source with `getDataSource().getJson()`, build
+binding signatures, or re-register in place. A materially changed mapping
+requires the dashboard runtime to remount the component.
 
-1. Read the attendee's deployed `vibeInsight` bundle first and create a separate
-   `vibeAction` bundle.
-2. Read `salesforce-action-link.md`. Add the hidden Account ID dimension before
-   all measures, map it as `row.accountId`, and do not render the ID.
-3. Omit or disable the action when its Account ID is missing or invalid. Do not
-   silently open a malformed URL.
+### Build 2: per-row insight
 
-## Result Limits
+1. Read `force-app/main/default/lwc/vibeTable/` and copy every inherited
+   property contract unchanged into the new bundle.
+2. Use the pre-baked, pre-deployed workshop head-start class at
+   `force-app/main/default/classes/RecordInsightGenerator.cls`. Attendees do
+   not author, modify, or deploy Apex during the workshop. Import its exact
+   `@AuraEnabled` method and preserve the named parameter shape.
+3. Compile `contract.insight` into a versioned payload containing the entity,
+   subject, goal, and selected context roles. Do not send every hidden value by
+   default.
+4. Use the panel-swap, request-token, focus-transfer, and refresh-invalidation
+   pattern in `references/apex-insight-panel.md`.
+5. Route model calls through Apex. Never call `aiplatform.ModelsAPI` from
+   JavaScript.
 
-The 25-row limit is a workshop presentation budget, not a Tableau data limit.
-Without supported server-side ordering in the dashboard SDK, client sorting can
-only order the returned set. Say "Up to 25 returned opportunities, sorted by
-displayed amount" or use wording appropriate to the query grain. Do not claim
-global "Top 25" results.
+The expected endpoint is:
 
-## Deployment And Verification
+```javascript
+import generateInsight from "@salesforce/apex/RecordInsightGenerator.generateInsight";
 
-Deploy only the changed bundle:
-
-```bash
-sf project deploy start --source-dir force-app/main/default/lwc/<bundle-name>
+const narrative = await generateInsight({
+  rowJson: JSON.stringify(payload),
+});
 ```
 
-After a data-backed deploy, verify initial rendering or a visible terminal error,
-then change one relevant dashboard filter and verify updated content. Also run
-the feature-specific interaction for Insight, Log a Call, a selected chart, or
-video. `test-contract.md` separates this quick workshop check from maintainer
-regression coverage.
+`OpportunityInsightGenerator` remains only as a compatibility shim for older
+workshop components. It is infrastructure, not an attendee task. Do not use it
+in newly generated bundles.
 
-After every successful deploy, use this exact attendee wording:
+### Build 3: per-row Salesforce action
+
+1. Read `force-app/main/default/lwc/vibeInsight/` and copy its complete
+   inherited contract unchanged into the new bundle.
+2. Derive and confirm an action descriptor: action kind, visible label, icon,
+   target record role, object API name for record-page navigation, quick-action
+   API name when applicable, and optional record-ID prefixes.
+3. Reuse an inherited ID role when it identifies the exact action target.
+4. Otherwise add a prompt-derived hidden `SemanticDimension` role. Verify that
+   it is functionally dependent on the current row grain; adding a grouping ID
+   must not split previously aggregated rows.
+5. Insert any new hidden dimension before every measure and rebuild the role
+   indexes.
+6. Use the validated origin-rewrite and generic record-action pattern from
+   `references/salesforce-action-link.md`.
+
+Do not default to Account, `001`, or `Global.LogACall`. Those belong only to a
+confirmed Account Log a Call action.
+
+## Critical SDK and UI gates
+
+1. Use `registerFieldsForQuery`, not `fetchDataUsingQueryAndSource`, for the
+   dashboard-owned registered query. The latter bypasses automatic dashboard
+   filter and parameter context.
+2. Declare every `rowGrouping: true` dimension before every
+   `rowGrouping: false` measure. Interleaving is silently reordered and corrupts
+   positional row mapping.
+3. Subscribe to `dataUpdate` before registration because registration may emit
+   synchronously.
+4. Start loading before registration so a synchronous result remains final.
+5. Never call `fetchData()` after registration or from `filterChange` and
+   `parameterChange`; the SDK refetches internally.
+6. Support delayed `sdk` and binding assignment with setter-scheduled one-shot
+   startup. Never synchronize query state from `renderedCallback`.
+7. Do not implement in-place rebinding. `dataUpdate` carries no query identity,
+   so require a runtime remount for a materially changed mapping.
+8. Emit `init` once per SDK connection and always terminate in `loaded`,
+   `nodata`, or `error`.
+9. Use an explicit no-data state and a visible terminal timeout error after
+   exactly eight seconds (`8000` ms).
+10. Use SLDS utilities and tokens first. Avoid inline styles. Reserve the
+    widget's top-right corner for Tableau Next hover chrome.
+11. Use semantic HTML and native Lightning controls. Interactive marks must be
+    keyboard operable, visibly focusable, and programmatically named.
+12. Use a date-only formatting branch for `YYYY-MM-DD` values so timezone
+    conversion cannot shift the displayed calendar date.
+13. Use "object" for SDM tables and `OBJ_` for recovery constants. Never emit
+    internal `SDO_` terminology.
+14. In a table, emit `<thead>`, `<tbody>`, `<th scope="col">`, and matching
+    `<td>` cells for every visible data or action column. Give the table a
+    prompt-derived caption or accessible name.
+
+## Optional visualization routes
+
+When the attendee asks for a chart, read `references/d3-in-lwc.md` plus the
+matching chart reference. Use only its layout mechanics and generic semantic
+roles; derive the business design from the prompt.
+
+| Reference             | Required semantic roles                                       |
+| --------------------- | ------------------------------------------------------------- |
+| `d3-beeswarm.md`      | item dimension, optional category dimension, position measure |
+| `d3-bump.md`          | period dimension, entity dimension, ranking measure           |
+| `d3-chord.md`         | source dimension, target dimension, weight measure            |
+| `d3-funnel.md`        | ordered step dimension, value measure                         |
+| `d3-radar.md`         | entity dimension and prompt-selected measures                 |
+| `d3-treemap.md`       | parent dimension, child dimension, size measure               |
+| `sparkline-column.md` | entity, period, and value; or labelled synthetic demo mode    |
+
+Do not add filter/selection behavior unless the prompt requests it. If the
+prompt requests interaction, publish against the configured source and role,
+and provide an equivalent keyboard path.
+
+For a media-only tile, read `references/video-player.md`. It has no SDM query,
+no discovery, and no `@api sdk`.
+
+## Worked example: DF26 Top Opportunities
+
+Use this only when the attendee asks for the canonical sales scenario or
+explicitly selects the recovery example.
+
+| Role                  | Property             | Type                |
+| --------------------- | -------------------- | ------------------- |
+| Stable opportunity ID | `opportunityIdField` | `SemanticDimension` |
+| Account display name  | `accountNameField`   | `SemanticDimension` |
+| Opportunity stage     | `stageField`         | `SemanticDimension` |
+| Close date            | `closeDateField`     | `SemanticDimension` |
+| Opportunity type      | `typeField`          | `SemanticDimension` |
+| Amount                | `amountField`        | `SemanticMeasure`   |
+
+For the canonical Build 3 only, an Account Log a Call action may add hidden
+`accountIdField: SemanticDimension`, validate prefixes `001`, and use
+`Global.LogACall`. This example never establishes defaults for other prompts.
+
+## Post-deploy response
+
+After a successful `sf project deploy start ... --source-dir ...`, return this
+block exactly, substituting only the two placeholders:
 
 > Deploy succeeded - `<lwc-name>` is live in your org.
 >
 > **How to add it to your dashboard:**
 >
-> 1. Open your Tableau Next dashboard **in edit mode** (from the Tableau tab in your org).
-> 2. In the **toolbar across the top of the dashboard**, click the **lightning-bolt icon** (tooltip: "Extension") - it's toward the right end of the icon row.
-> 3. The extensions picker opens with a list of your custom LWC extensions. Find **`Vibe <Name>`** in that list.
+> 1. Open your Tableau Next dashboard **in edit mode** (from the Tableau
+>    tab in your org).
+> 2. In the **toolbar across the top of the dashboard**, click the
+>    **lightning-bolt icon** (tooltip: "Extension") - it's toward the
+>    right end of the icon row.
+> 3. The extensions picker opens with a list of your custom LWC
+>    extensions. Find **`Vibe <Name>`** in that list.
 > 4. Drag it onto your dashboard canvas.
+> 5. In the widget panel, select the semantic model and map every required
+>    dimension and measure role. Select the aggregation for each measure.
 >
-> That's it. The widget renders on drop.
+> The widget renders as soon as all required roles are mapped.
 
-Substitute the bundle name and the `<masterLabel>` only.
+Do not add Analytics Studio, left-panel, Components-tab, or puzzle-piece steps;
+those locations do not apply to Tableau Next extensions.
 
 ## Troubleshooting
 
-| Symptom | Read | Likely correction |
-| --- | --- | --- |
-| SDK is undefined during connect | `sdk-query-lifecycle.md` | Retry from `renderedCallback`; do not start twice. |
-| Spinner never resolves | `sdk-query-lifecycle.md` | Confirm loading starts before registration and timeout becomes visible. |
-| Calc field query returns 400 | `sdm-table.md` | Use bare `_clc`/`_mtc` model with no aggregation. |
-| IDs or labels become amounts | `sdk-query-lifecycle.md` | Put every dimension before every measure and rebuild `IDX`. |
-| Insight overwrites a newer panel | `apex-insight-panel.md` | Use a request token and invalidate stale work. |
-| Action does nothing | `salesforce-action-link.md` | Validate the ID and rewritten Lightning origin. |
-| D3 chart is empty or disappears | `d3-in-lwc.md` | Check manual DOM, D3 readiness, buffer, and lifecycle generation. |
-| Video tile is blank | `video-player.md` | Check URL policy and the org's YouTube CSP Trusted Site. |
+| Symptom                                               | Cause                                                                     | Fix                                                                        |
+| ----------------------------------------------------- | ------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| Calculated measure query returns an aggregation error | An aggregation was set on a bare calculated measure                       | Omit `aggregationType`; the model owns it                                  |
+| Field does not exist in table                         | A model-level field was qualified or a recovery mapping was guessed       | Use the confirmed bare model-level name or rerun discovery                 |
+| Widget enters error during load                       | `fetchData()` raced the registered query                                  | Remove explicit fetches from registration and filter handlers              |
+| Initial rows never arrive                             | Subscription was installed after registration                             | Subscribe before `registerFieldsForQuery`                                  |
+| Text or ID contains a numeric measure                 | A dimension was placed after a measure or role indexes do not match specs | Group all dimensions first and rebuild indexes                             |
+| Configuration state remains visible                   | A required semantic role is unmapped                                      | Map every required role; do not add a hard-coded fallback                  |
+| Old rows appear after remapping                       | Overlapping registrations cannot be attributed                            | Require remount; do not advertise live retargeting                         |
+| Insight returns to a closed or newer panel            | Missing request-token invalidation                                        | Apply the complete pattern in `apex-insight-panel.md`                      |
+| Salesforce action does nothing                        | Invalid target ID, action name, or rewritten origin                       | Validate the confirmed action descriptor before opening                    |
+| Date displays one day early                           | UTC parsing was used for a date-only value                                | Construct the local date from year, month, and day parts                   |
+| Component is absent from the picker                   | Incorrect metadata target or API version                                  | Use `analytics__Dashboard` and API `67.0`                                  |
+| Deploy validator throws a null property type error    | The org retains an old target-property shape                              | Deploy once without the analytics target, then restore it and deploy again |
+| D3 chart is empty or disappears                       | D3 readiness, buffering, or visual lifecycle failed                       | Read `d3-in-lwc.md` and the selected chart reference                       |
+| Video tile is blank                                   | URL policy or YouTube CSP configuration rejected the source               | Read `video-player.md`                                                     |
 
-## Skill Files
+## Verification
+
+Read `references/test-contract.md` before deployment and
+`references/skill-evals.md` when changing this skill. At minimum:
+
+1. Compare Build 1 -> 2 -> 3 metadata as structured properties.
+2. Verify all dimensions precede measures in every query.
+3. Verify each visible label and accessible name comes from the prompt or a
+   mapped binding.
+4. Run a canonical Opportunity generation and an unrelated Support Case
+   generation; the latter must contain no leaked sales roles or actions.
+5. Smoke-test the concrete mapped query through
+   `references/smoke-test-query.md`.
+6. Exercise loaded, no-data, error, filter refresh, insight focus, stale
+   response, and action validation behavior in a live dashboard.
+
+## Files
 
 ```text
 .a4drules/skills/tableau-next-workshop-lwc/
-├── SKILL.md
-├── IMPROVEMENTS.md                 # historical findings and dispositions
-└── references/
-    ├── sdk-query-lifecycle.md      # authoritative SDK lifecycle
-    ├── sdm-table.md                # Build 1 table details
-    ├── smoke-test-query.md         # query validation before code
-    ├── apex-insight-panel.md       # Build 2 details
-    ├── salesforce-action-link.md   # Build 3 details
-    ├── d3-in-lwc.md                # D3 lifecycle overlay
-    ├── d3-*.md                     # chart-specific algorithms
-    ├── sparkline-column.md
-    ├── video-player.md
-    ├── test-contract.md            # maintainer and workshop verification
-    └── skill-evals.md              # focused skill-output evaluation cases
+|-- SKILL.md
+|-- README.md
+|-- IMPROVEMENTS.md
+`-- references/
+    |-- sdm-data-binding.md
+    |-- sdk-query-lifecycle.md
+    |-- sdm-table.md
+    |-- sdm-helpers.js
+    |-- smoke-test-query.md
+    |-- apex-insight-panel.md
+    |-- salesforce-action-link.md
+    |-- d3-in-lwc.md
+    |-- d3-beeswarm.md
+    |-- d3-bump.md
+    |-- d3-chord.md
+    |-- d3-funnel.md
+    |-- d3-radar.md
+    |-- d3-treemap.md
+    |-- sparkline-column.md
+    |-- video-player.md
+    |-- skill-evals.md
+    `-- test-contract.md
 ```
 
-`IMPROVEMENTS.md` records why these rules exist. It is not an additional source
-of canonical code; the routed references above are authoritative.
+## Attribution
+
+Forked from `tableau-next-custom-lwc` at `alaviron/tableau-skills` (Tableau
+Next tooling team). Wire-format behavior was verified from internal reference
+tooling and live workshop prototypes. This fork remains DF26-specific.
+
+`IMPROVEMENTS.md` is a historical decision record only. It does not override
+`SKILL.md` or the routed references.

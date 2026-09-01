@@ -42,7 +42,7 @@ fi
 
 echo "→ Resolve SDM apiName → id"
 SDM_ID=$(curl -sS -H "Authorization: Bearer $SF_TOKEN" \
-  "$SF_INSTANCE/services/data/v66.0/ssot/semantic/models/$SDM_APINAME" \
+  "$SF_INSTANCE/services/data/v67.0/ssot/semantic/models/$SDM_APINAME" \
   | jq -r '.id')
 
 if [[ -z "$SDM_ID" || "$SDM_ID" == "null" ]]; then
