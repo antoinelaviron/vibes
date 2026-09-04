@@ -18,7 +18,6 @@ public with sharing class RecordInsightGenerator {
 
     /**
      * Generate a two-to-four sentence narrative from a semantic row envelope.
-     * Legacy flat rows are adapted by OpportunityInsightGenerator.
      */
     @AuraEnabled(cacheable=false)
     public static String generateInsight(String rowJson) {

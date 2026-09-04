@@ -83,7 +83,7 @@ in-place rebinding.
 | Filters | Registered-query refresh arrives through `dataUpdate`; no handler calls `fetchData()`. |
 | Dates | `YYYY-MM-DD` retains its day under `TZ=America/Los_Angeles`. |
 | Result bounds | Query and display limits are distinct; client-sorted data is described as returned rows, not unsupported global top-N. |
-| Insight endpoint | New bundles call generic `RecordInsightGenerator`; old `OpportunityInsightGenerator` imports delegate only for compatibility. |
+| Insight endpoint | New bundles call generic `RecordInsightGenerator`. |
 | Insight payload | The generic envelope includes entity, subject, goal, and selected context roles; record strings are treated as data. |
 | Insight race | Old responses cannot update a newer, closed, refreshed, remapped, or disconnected panel. |
 | Insight focus | Focus moves to Back and returns to the row trigger or deterministic data heading. |
@@ -104,16 +104,15 @@ in-place rebinding.
 
 ## Apex infrastructure checks
 
-Before pre-deploying the head-start classes:
+Before pre-deploying the head-start class:
 
-1. Compile `RecordInsightGenerator` and `OpportunityInsightGenerator` together.
+1. Compile `RecordInsightGenerator`.
 2. Call the generic endpoint with a Support Case envelope and verify the result
    does not introduce deal, pipeline, opportunity, or sales-rep language.
-3. Call the compatibility endpoint with a legacy flat Opportunity payload.
-4. Verify malformed, oversized, connector-failure, and unexpected-failure paths
+3. Verify malformed, oversized, connector-failure, and unexpected-failure paths
    return the same bounded user-safe fallback where applicable.
-5. Verify an empty generation returns the same bounded user-safe fallback.
-6. Confirm the attendee profile or permission set can invoke both Apex classes.
+4. Verify an empty generation returns the same bounded user-safe fallback.
+5. Confirm the attendee profile or permission set can invoke the Apex class.
 
 The starter repository has no local Models API mock seam. Do not fabricate a
 unit test that cannot run; use the workshop org's normal validation process for

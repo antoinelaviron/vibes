@@ -267,10 +267,6 @@ const narrative = await generateInsight({
 });
 ```
 
-`OpportunityInsightGenerator` remains only as a compatibility shim for older
-workshop components. It is infrastructure, not an attendee task. Do not use it
-in newly generated bundles.
-
 ### Build 3: per-row Salesforce action
 
 1. Read `force-app/main/default/lwc/vibeInsight/` and copy its complete
